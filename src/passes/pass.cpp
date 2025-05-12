@@ -259,6 +259,9 @@ void PassRegistry::registerPasses() {
     "trace-calls",
     "instrument the build with code to intercept specific function calls",
     createTraceCallsPass);
+  registerPass("insert-safepoint-call",
+               "insert calls to a safepoint function",
+               createInsertSafePointCallPass);
   registerPass(
     "instrument-locals",
     "instrument the build with code to intercept all loads and stores",
