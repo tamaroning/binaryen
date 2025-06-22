@@ -775,10 +775,8 @@ public:
     onlyList.checkPatternsMatches();
   }
 
-  bool needsInstrumentation(Function* func) {
-    auto& info = map[func];
-    return info.canChangeState && !info.isTopMostRuntime;
-  }
+  // Modified to always true bacause we assume migration can happen in any function.
+  bool needsInstrumentation(Function* func) { return true; }
 
   bool canChangeState(Expression* curr, Function* func) {
     // Look inside to see if we call any of the things we know can change the
