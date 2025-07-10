@@ -463,6 +463,9 @@ void PassRegistry::registerPasses() {
   registerPass("separate-data-segments",
                "write data segments to a file and strip them from the module",
                createSeparateDataSegmentsPass);
+  registerPass("snapify",
+              "enable to checkpoint and restore the state of the module",
+              createSnapifyPass);
   registerPass("signature-pruning",
                "remove params from function signature types where possible",
                createSignaturePruningPass);

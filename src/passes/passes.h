@@ -153,6 +153,7 @@ Pass* createRoundTripPass();
 Pass* createSafeHeapPass();
 Pass* createSetGlobalsPass();
 Pass* createSeparateDataSegmentsPass();
+Pass* createSnapifyPass();
 Pass* createSignaturePruningPass();
 Pass* createSignatureRefiningPass();
 Pass* createSignExtLoweringPass();

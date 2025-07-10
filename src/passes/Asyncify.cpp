@@ -356,6 +356,7 @@
 #include "passes/pass-utils.h"
 #include "support/file.h"
 #include "support/string.h"
+#include "support/utilities.h"
 #include "wasm-builder.h"
 #include "wasm.h"
 
@@ -365,6 +366,7 @@ namespace {
 
 static const Name ASYNCIFY_STATE = "__asyncify_state";
 static const Name ASYNCIFY_GET_STATE = "asyncify_get_state";
+static const Name ASYNCIFY_SET_STATE = "asyncify_set_state";
 static const Name ASYNCIFY_DATA = "__asyncify_data";
 static const Name ASYNCIFY_START_UNWIND = "asyncify_start_unwind";
 static const Name ASYNCIFY_STOP_UNWIND = "asyncify_stop_unwind";
@@ -378,6 +380,8 @@ static const Name START_REWIND = "start_rewind";
 static const Name STOP_REWIND = "stop_rewind";
 static const Name ASYNCIFY_GET_CALL_INDEX = "__asyncify_get_call_index";
 static const Name ASYNCIFY_CHECK_CALL_INDEX = "__asyncify_check_call_index";
+static const Name GET_STATE = "get_state";
+static const Name SET_STATE = "set_state";
 
 // TODO: having just normal/unwind_or_rewind would decrease code
 //       size, but make debugging harder
@@ -596,6 +600,10 @@ public:
           renamings[func->name] = ASYNCIFY_START_REWIND;
         } else if (func->base == STOP_REWIND) {
           renamings[func->name] = ASYNCIFY_STOP_REWIND;
+        } else if (func->base == GET_STATE) {
+          renamings[func->name] = ASYNCIFY_GET_STATE;
+        } else if (func->base == SET_STATE) {
+          renamings[func->name] = ASYNCIFY_SET_STATE;
         } else {
           Fatal() << "call to unidenfied asyncify import: " << func->base;
         }
@@ -651,6 +659,12 @@ public:
               } else if (target->base == STOP_REWIND) {
                 info.canChangeState = true;
                 info.isTopMostRuntime = true;
+              } else if (target->base == GET_STATE) {
+                info.isTopMostRuntime = true;
+              } else if (target->base == SET_STATE) {
+                WASM_UNREACHABLE(
+                  "call to asyncify.set_state is not expected, as it is not "
+                  "used in the asyncify runtime");
               } else {
                 WASM_UNREACHABLE("call to unidenfied asyncify import");
               }
@@ -2011,6 +2025,16 @@ private:
                            builder.makeGlobalGet(ASYNCIFY_STATE, Type::i32)));
     module->addExport(builder.makeExport(
       ASYNCIFY_GET_STATE, ASYNCIFY_GET_STATE, ExternalKind::Function));
+
+    // Synthesize asyncify_set_state(i32) function.
+    module->addFunction(builder.makeFunction(
+      ASYNCIFY_SET_STATE,
+      Signature({Type::i32}, Type::none),
+      {},
+      builder.makeGlobalSet(ASYNCIFY_STATE,
+                            builder.makeLocalGet(0, Type::i32))));
+    module->addExport(builder.makeExport(
+      ASYNCIFY_SET_STATE, ASYNCIFY_SET_STATE, ExternalKind::Function));
   }
 
   Name createSecondaryMemory(Module* module, Address secondaryMemorySize) {

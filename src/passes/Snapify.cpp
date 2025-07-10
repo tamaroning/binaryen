@@ -1,0 +1,204 @@
+#include "asmjs/shared-constants.h"
+#include "ir/iteration.h"
+#include "ir/memory-utils.h"
+#include "ir/module-utils.h"
+#include "ir/names.h"
+#include "ir/utils.h"
+#include "wasm.h"
+#include <pass.h>
+#include <wasm-builder.h>
+#include <wasm-traversal.h>
+
+namespace wasm {
+
+static const Name SNAPIFY_MIGRATION_POINT = "snapify_migration_point";
+static const int32_t ASYNCIFY_METADATA_ADDRESS = 16;
+
+enum class DataOffset { BStackPos = 0, BStackEnd = 4, BStackEnd64 = 8 };
+
+static const int32_t ASYNCIFY_STACK_START = 24;
+static const int32_t ASYNCIFY_STACK_END = 1024;
+
+static const Name ASYNCIFY_STATE = "__asyncify_state";
+static const Name ASYNCIFY_GET_STATE = "asyncify_get_state";
+static const Name ASYNCIFY_DATA = "__asyncify_data";
+static const Name ASYNCIFY_START_UNWIND = "asyncify_start_unwind";
+static const Name ASYNCIFY_STOP_UNWIND = "asyncify_stop_unwind";
+static const Name ASYNCIFY_START_REWIND = "asyncify_start_rewind";
+static const Name ASYNCIFY_STOP_REWIND = "asyncify_stop_rewind";
+static const Name ASYNCIFY_UNWIND = "__asyncify_unwind";
+static const Name ASYNCIFY = "asyncify";
+static const Name START_UNWIND = "start_unwind";
+static const Name STOP_UNWIND = "stop_unwind";
+static const Name START_REWIND = "start_rewind";
+static const Name STOP_REWIND = "stop_rewind";
+static const Name ASYNCIFY_GET_CALL_INDEX = "__asyncify_get_call_index";
+static const Name ASYNCIFY_CHECK_CALL_INDEX = "__asyncify_check_call_index";
+
+// Extension
+static const Name GET_STATE = "get_state";
+static const Name SET_STATE = "set_state";
+
+// TODO: having just normal/unwind_or_rewind would decrease code
+//       size, but make debugging harder
+enum class State { Normal = 0, Unwinding = 1, Rewinding = 2 };
+
+bool isSynthesizedFunction(Name& name) {
+  return name == ASYNCIFY_START_UNWIND || name == ASYNCIFY_STOP_UNWIND ||
+         name == START_UNWIND || name == STOP_UNWIND ||
+         name == ASYNCIFY_START_REWIND || name == ASYNCIFY_STOP_REWIND ||
+         name == START_REWIND || name == STOP_REWIND || name == SET_STATE ||
+         name == GET_STATE || name == ASYNCIFY_GET_STATE ||
+         name == SNAPIFY_MIGRATION_POINT;
+}
+
+struct MigrationPointInserter
+  : public WalkerPass<PostWalker<MigrationPointInserter>> {
+  void visitFunction(Function* curr) {
+    // if this is imported, we don't need to do anything
+    if (curr->imported()) {
+      return;
+    }
+    // we don't need to insert a migration point in the migration point
+    if (isSynthesizedFunction(curr->name)) {
+      return;
+    }
+
+    // insert a migration point at the begeninng of each function
+    Builder builder(*getModule());
+    const auto call = builder.makeCall(SNAPIFY_MIGRATION_POINT, {}, Type::none);
+    const auto newBody = builder.makeSequence(call, curr->body);
+
+    curr->body = newBody;
+  }
+
+  void visitLoop(Loop* curr) {
+    // insert a safepoint call at the beginning of each loop
+    Builder builder(*getModule());
+    const auto call = builder.makeCall(SNAPIFY_MIGRATION_POINT, {}, Type::none);
+    const auto newBody = builder.makeSequence(call, curr->body);
+    curr->body = newBody;
+  }
+};
+
+class Snapify : public Pass {
+public:
+  bool addsEffects() override { return true; }
+
+  void run(Module* module) override {
+    addAsyncifyImports(module);
+    addSnapifyMemory(module, 1);
+    addFunctions(module);
+    addGlobals(module);
+
+    MigrationPointInserter().walkModule(module);
+  }
+
+private:
+  Name snapifyMemory;
+
+  void addAsyncifyImports(Module* module) {
+    addImportFunction(module, ASYNCIFY, START_UNWIND, {Type::i32}, {});
+    addImportFunction(module, ASYNCIFY, STOP_UNWIND, {}, {});
+    addImportFunction(module, ASYNCIFY, START_REWIND, {Type::i32}, {});
+    addImportFunction(module, ASYNCIFY, STOP_REWIND, {}, {});
+    addImportFunction(module, ASYNCIFY, GET_STATE, {}, Type::i32);
+    addImportFunction(module, ASYNCIFY, SET_STATE, {Type::i32}, {});
+  }
+
+  void addSnapifyMemory(Module* module, Address secondaryMemorySize) {
+    Name name = Names::getValidMemoryName(*module, "snapify_memory");
+    auto secondaryMemory =
+      Builder::makeMemory(name, secondaryMemorySize, secondaryMemorySize);
+    module->addMemory(std::move(secondaryMemory));
+    snapifyMemory = name;
+  }
+
+  // helper function to add an import function
+  void addImportFunction(
+    Module* module, Name mod, Name name, Type params, Type results) {
+    Builder builder(*module);
+    auto import = builder.makeFunction(name, Signature(params, results), {});
+    import->module = mod;
+    import->base = name;
+    module->addFunction(std::move(import));
+  }
+
+  void addFunctions(Module* module) {
+    // synthesize SNAPIFY_MIGRATION_POINT function
+    Builder builder(*module);
+    Function* f = addFunction(module, SNAPIFY_MIGRATION_POINT, {}, {});
+    builder.addVar(f, Type::i32); // state
+    auto* getState =
+      builder.makeLocalSet(0, builder.makeCall(GET_STATE, {}, Type::i32));
+
+    Type pointerType =
+      module->getMemory(snapifyMemory)->is64() ? Type::i64 : Type::i32;
+
+    auto unwindBlock = builder.makeBlock();
+    unwindBlock->list.push_back(
+      builder.makeStore(pointerType.getByteSize(),
+                        int(DataOffset::BStackPos),
+                        pointerType.getByteSize(),
+                        builder.makeConst(Literal(ASYNCIFY_METADATA_ADDRESS)),
+                        builder.makeConst(Literal(ASYNCIFY_STACK_START)),
+                        pointerType,
+                        snapifyMemory));
+    unwindBlock->list.push_back(
+      builder.makeStore(pointerType.getByteSize(),
+                        int(pointerType == Type::i64 ? DataOffset::BStackEnd64
+                                                     : DataOffset::BStackEnd),
+                        pointerType.getByteSize(),
+                        builder.makeConst(Literal(ASYNCIFY_METADATA_ADDRESS)),
+                        builder.makeConst(Literal(ASYNCIFY_STACK_END)),
+                        pointerType,
+                        snapifyMemory));
+    unwindBlock->list.push_back(
+      builder.makeCall(START_UNWIND,
+                       {builder.makeConst(Literal(ASYNCIFY_METADATA_ADDRESS))},
+                       Type::none));
+    unwindBlock->finalize(Type::none);
+
+    auto* checkState = builder.makeIf(
+      builder.makeBinary(EqInt32,
+                         builder.makeLocalGet(0, Type::i32),
+                         builder.makeConst(Literal(int32_t(State::Unwinding)))),
+      unwindBlock,
+      builder.makeIf(builder.makeBinary(
+                       EqInt32,
+                       builder.makeLocalGet(0, Type::i32),
+                       builder.makeConst(Literal(int32_t(State::Rewinding)))),
+                     builder.makeCall(STOP_REWIND, {}, Type::none)));
+    auto* block = builder.makeBlock();
+    block->list.push_back(getState);
+    block->list.push_back(checkState);
+    block->finalize(Type::none);
+    f->body = block;
+  }
+
+  // helper function to add a function
+  Function* addFunction(Module* wasm, Name name, Type params, Type results) {
+    Builder builder(*wasm);
+    auto func = builder.makeFunction(name, Signature(params, results), {});
+    Function* f = wasm->addFunction(std::move(func));
+    wasm->addExport(builder.makeExport(name, name, ExternalKind::Function));
+    return f;
+  }
+
+  void addGlobals(Module* module) {
+    // addImportGlobal(module, ASYNCIFY, ASYNCIFY_STATE, Type::i32);
+  }
+
+  void addImportGlobal(Module* module, Name mod, Name name, Type type) {
+    Builder builder(*module);
+    auto global = builder.makeGlobal(
+      name, type, LiteralUtils::makeZero(type, *module), Builder::Mutable);
+    global->module = mod;
+    global->base = name;
+    module->addGlobal(std::move(global));
+  }
+};
+
+Pass* createSnapifyPass() { return new Snapify(); }
+
+} // namespace wasm
