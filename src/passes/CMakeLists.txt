@@ -94,6 +94,7 @@ set(passes_SOURCES
   PrintFunctionMap.cpp
   RoundTrip.cpp
   SetGlobals.cpp
+  Snapify.cpp
   SignaturePruning.cpp
   SignatureRefining.cpp
   SignExtLowering.cpp

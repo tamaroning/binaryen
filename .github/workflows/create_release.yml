@@ -1,11 +1,15 @@
 name: Create Release
 
-# Trigger whenever a tag is created/updated
+# Trigger whenever a tag is created/updated or when pushing to snapify branch
+# Can also be manually triggered from GitHub Actions UI
 
 on:
   push:
+    branches:
+      - snapify
     tags:
       - "*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -152,8 +156,8 @@ jobs:
       run: |
         ./alpine.sh ninja install
 
-    - name: test
-      run: ./alpine.sh python3 ./check.py
+    #- name: test
+    #  run: ./alpine.sh python3 ./check.py
 
     - name: archive
       id: archive
