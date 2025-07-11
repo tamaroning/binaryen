@@ -11,11 +11,15 @@
 
 namespace wasm {
 
+static const Name SNAPIFY = "snapify";
+static const Name SHOULD_CHECKPOINT = "should_checkpoint";
+static const Name SHOULD_RESTORE = "should_restore";
 static const Name SNAPIFY_MIGRATION_POINT = "snapify_migration_point";
+// static const Name SNAPIFY_SHOULD_CHECKPOINT = "snapify_should_checkpoint";
+// static const Name SNAPIFY_SHOULD_RESTORE = "snapify_should_restore";
+
 static const int32_t ASYNCIFY_METADATA_ADDRESS = 16;
-
 enum class DataOffset { BStackPos = 0, BStackEnd = 4, BStackEnd64 = 8 };
-
 static const int32_t ASYNCIFY_STACK_START = 24;
 static const int32_t ASYNCIFY_STACK_END = 1024;
 
@@ -86,8 +90,11 @@ public:
   bool addsEffects() override { return true; }
 
   void run(Module* module) override {
+    AddSnapifyImports(module);
     addAsyncifyImports(module);
     addSnapifyMemory(module, 1);
+    module->addExport(Builder(*module).makeExport(
+      snapifyMemory, snapifyMemory, ExternalKind::Memory));
     addFunctions(module);
     addGlobals(module);
 
@@ -96,6 +103,10 @@ public:
 
 private:
   Name snapifyMemory;
+
+  void AddSnapifyImports(Module* module) {
+    addImportFunction(module, SNAPIFY, SHOULD_CHECKPOINT, {}, Type::i32);
+  }
 
   void addAsyncifyImports(Module* module) {
     addImportFunction(module, ASYNCIFY, START_UNWIND, {Type::i32}, {});
@@ -125,16 +136,26 @@ private:
   }
 
   void addFunctions(Module* module) {
-    // synthesize SNAPIFY_MIGRATION_POINT function
+    /*
+    Synthesize snapify_migration_point function:
+    ```js
+    function snapify_migration_point() {
+      if (snapify_should_checkpoint()) {
+        // unwind the stack
+        store(ASYNCIFY_METADATA_ADDRESS + BStackPos, ASYNCIFY_STACK_START);
+        store(ASYNCIFY_METADATA_ADDRESS + BStackEnd, ASYNCIFY_STACK_END);
+        asyncify_start_unwind(ASYNCIFY_METADATA_ADDRESS);
+      } else if (asyncify_get_state() == ASYNCIFY_STATE_REWINDING) {
+        asyncify_stop_rewind();
+      }
+    }
+    ```
+    */
     Builder builder(*module);
-    Function* f = addFunction(module, SNAPIFY_MIGRATION_POINT, {}, {});
-    builder.addVar(f, Type::i32); // state
-    auto* getState =
-      builder.makeLocalSet(0, builder.makeCall(GET_STATE, {}, Type::i32));
-
+    Function* f =
+      addFunction(module, SNAPIFY_MIGRATION_POINT, Type::none, Type::none);
     Type pointerType =
       module->getMemory(snapifyMemory)->is64() ? Type::i64 : Type::i32;
-
     auto unwindBlock = builder.makeBlock();
     unwindBlock->list.push_back(
       builder.makeStore(pointerType.getByteSize(),
@@ -161,16 +182,16 @@ private:
 
     auto* checkState = builder.makeIf(
       builder.makeBinary(EqInt32,
-                         builder.makeLocalGet(0, Type::i32),
-                         builder.makeConst(Literal(int32_t(State::Unwinding)))),
+                         builder.makeCall(SHOULD_CHECKPOINT, {}, Type::i32),
+                         builder.makeConst(Literal(int32_t(1)))),
+
       unwindBlock,
       builder.makeIf(builder.makeBinary(
                        EqInt32,
-                       builder.makeLocalGet(0, Type::i32),
+                       builder.makeCall(GET_STATE, {}, Type::i32),
                        builder.makeConst(Literal(int32_t(State::Rewinding)))),
                      builder.makeCall(STOP_REWIND, {}, Type::none)));
     auto* block = builder.makeBlock();
-    block->list.push_back(getState);
     block->list.push_back(checkState);
     block->finalize(Type::none);
     f->body = block;
