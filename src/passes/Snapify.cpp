@@ -13,7 +13,7 @@ namespace wasm {
 
 static const Name SNAPIFY = "snapify";
 static const Name SHOULD_CHECKPOINT = "should_checkpoint";
-static const Name SHOULD_RESTORE = "should_restore";
+static const Name SNAPIFY_START_RESTORE = "snapify_start_restore";
 static const Name SNAPIFY_MIGRATION_POINT = "snapify_migration_point";
 // static const Name SNAPIFY_SHOULD_CHECKPOINT = "snapify_should_checkpoint";
 // static const Name SNAPIFY_SHOULD_RESTORE = "snapify_should_restore";
@@ -93,8 +93,7 @@ public:
     AddSnapifyImports(module);
     addAsyncifyImports(module);
     addSnapifyMemory(module, 1);
-    module->addExport(Builder(*module).makeExport(
-      snapifyMemory, snapifyMemory, ExternalKind::Memory));
+
     addFunctions(module);
     addGlobals(module);
 
@@ -123,6 +122,10 @@ private:
       Builder::makeMemory(name, secondaryMemorySize, secondaryMemorySize);
     module->addMemory(std::move(secondaryMemory));
     snapifyMemory = name;
+
+    // Add an export for the snapify memory.
+    module->addExport(Builder(*module).makeExport(
+      snapifyMemory, snapifyMemory, ExternalKind::Memory));
   }
 
   // helper function to add an import function
@@ -136,6 +139,11 @@ private:
   }
 
   void addFunctions(Module* module) {
+    synthesizeSnapifyMigrationPoint(module);
+    synthesizeStartRestore(module);
+  }
+
+  void synthesizeSnapifyMigrationPoint(Module* module) {
     /*
     Synthesize snapify_migration_point function:
     ```js
@@ -204,6 +212,29 @@ private:
     Function* f = wasm->addFunction(std::move(func));
     wasm->addExport(builder.makeExport(name, name, ExternalKind::Function));
     return f;
+  }
+
+  void synthesizeStartRestore(Module* module) {
+    /*
+    Synthesize snapify_start_restore function:
+    ```js
+    function snapify_start_restore() {
+      asyncify_set_state(ASYNCIFY_STATE_REWINDING);
+    }
+    ```
+    */
+    Builder builder(*module);
+    auto* f =
+      addFunction(module, SNAPIFY_START_RESTORE, Type::none, Type::none);
+    auto* block = builder.makeBlock();
+    block->list.push_back(builder.makeGlobalSet(
+      ASYNCIFY_STATE, builder.makeConst(int32_t(State::Rewinding))));
+    block->finalize(Type::none);
+    f->body = block;
+
+    // Add an export for the snapify_start_restore function.
+    module->addExport(builder.makeExport(
+      SNAPIFY_START_RESTORE, SNAPIFY_START_RESTORE, ExternalKind::Function));
   }
 
   void addGlobals(Module* module) {
