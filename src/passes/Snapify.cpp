@@ -36,8 +36,6 @@ static const Name START_UNWIND = "start_unwind";
 static const Name STOP_UNWIND = "stop_unwind";
 static const Name START_REWIND = "start_rewind";
 static const Name STOP_REWIND = "stop_rewind";
-static const Name ASYNCIFY_GET_CALL_INDEX = "__asyncify_get_call_index";
-static const Name ASYNCIFY_CHECK_CALL_INDEX = "__asyncify_check_call_index";
 
 // Extension
 static const Name GET_STATE = "get_state";
@@ -48,12 +46,7 @@ static const Name SET_STATE = "set_state";
 enum class State { Normal = 0, Unwinding = 1, Rewinding = 2 };
 
 bool isSynthesizedFunction(Name& name) {
-  return name == ASYNCIFY_START_UNWIND || name == ASYNCIFY_STOP_UNWIND ||
-         name == START_UNWIND || name == STOP_UNWIND ||
-         name == ASYNCIFY_START_REWIND || name == ASYNCIFY_STOP_REWIND ||
-         name == START_REWIND || name == STOP_REWIND || name == SET_STATE ||
-         name == GET_STATE || name == ASYNCIFY_GET_STATE ||
-         name == SNAPIFY_MIGRATION_POINT;
+  return name == SNAPIFY_MIGRATION_POINT || name == SNAPIFY_START_RESTORE;
 }
 
 struct MigrationPointInserter
@@ -227,14 +220,12 @@ private:
     auto* f =
       addFunction(module, SNAPIFY_START_RESTORE, Type::none, Type::none);
     auto* block = builder.makeBlock();
-    block->list.push_back(builder.makeGlobalSet(
-      ASYNCIFY_STATE, builder.makeConst(int32_t(State::Rewinding))));
+    block->list.push_back(
+      builder.makeCall(SET_STATE,
+                       {builder.makeConst(Literal(int32_t(State::Rewinding)))},
+                       Type::none));
     block->finalize(Type::none);
     f->body = block;
-
-    // Add an export for the snapify_start_restore function.
-    module->addExport(builder.makeExport(
-      SNAPIFY_START_RESTORE, SNAPIFY_START_RESTORE, ExternalKind::Function));
   }
 
   void addGlobals(Module* module) {

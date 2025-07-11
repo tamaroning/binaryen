@@ -662,9 +662,7 @@ public:
               } else if (target->base == GET_STATE) {
                 info.isTopMostRuntime = true;
               } else if (target->base == SET_STATE) {
-                WASM_UNREACHABLE(
-                  "call to asyncify.set_state is not expected, as it is not "
-                  "used in the asyncify runtime");
+                info.isBottomMostRuntime = true;
               } else {
                 WASM_UNREACHABLE("call to unidenfied asyncify import");
               }
