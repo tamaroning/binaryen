@@ -212,7 +212,7 @@ private:
     Synthesize snapify_start_restore function:
     ```js
     function snapify_start_restore() {
-      asyncify_set_state(ASYNCIFY_STATE_REWINDING);
+      asyncify_start_rewind(ASYNCIFY_METADATA_ADDRESS);
     }
     ```
     */
@@ -220,10 +220,10 @@ private:
     auto* f =
       addFunction(module, SNAPIFY_START_RESTORE, Type::none, Type::none);
     auto* block = builder.makeBlock();
-    block->list.push_back(
-      builder.makeCall(SET_STATE,
-                       {builder.makeConst(Literal(int32_t(State::Rewinding)))},
-                       Type::none));
+    block->list.push_back(builder.makeCall(
+      START_REWIND,
+      {builder.makeConst(Literal(int32_t(ASYNCIFY_METADATA_ADDRESS)))},
+      Type::none));
     block->finalize(Type::none);
     f->body = block;
   }
