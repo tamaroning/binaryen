@@ -83,10 +83,18 @@ public:
   bool addsEffects() override { return true; }
 
   void run(Module* module) override {
+    // Ensure the module contains a single memory.
+    if (module->memories.size() != 1) {
+      Fatal() << "Snapify requires a single memory in the module";
+    }
+    if (!module->getExportOrNull("memory")) {
+      module->addExport(Builder(*module).makeExport(
+        "memory", module->memories[0]->name, ExternalKind::Memory));
+    }
+
     AddSnapifyImports(module);
     addAsyncifyImports(module);
     addSnapifyMemory(module, 1);
-
     addFunctions(module);
     addGlobals(module);
 
