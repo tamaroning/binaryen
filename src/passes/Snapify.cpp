@@ -5,6 +5,7 @@
 #include "ir/names.h"
 #include "ir/utils.h"
 #include "wasm.h"
+#include <cassert>
 #include <pass.h>
 #include <wasm-builder.h>
 #include <wasm-traversal.h>
@@ -17,27 +18,40 @@ static const Name SNAPIFY_START_RESTORE = "snapify_start_restore";
 static const Name SNAPIFY_MIGRATION_POINT = "snapify_migration_point";
 // static const Name SNAPIFY_SHOULD_CHECKPOINT = "snapify_should_checkpoint";
 // static const Name SNAPIFY_SHOULD_RESTORE = "snapify_should_restore";
+static const Name SNAPIFY_CHECKPOINT_GLOBALS = "snapify_checkpoint_globals";
+static const Name SNAPIFY_RESTORE_GLOBALS = "snapify_restore_globals";
+static const Name SNAPIFY_CHECKPOINT_TABLES = "snapify_checkpoint_tables";
+static const Name SNAPIFY_RESTORE_TABLES = "snapify_restore_tables";
 
 static const int32_t ASYNCIFY_METADATA_ADDRESS = 16;
 enum class DataOffset { BStackPos = 0, BStackEnd = 4, BStackEnd64 = 8 };
-static const int32_t ASYNCIFY_STACK_START = 24;
-static const int32_t ASYNCIFY_STACK_END = 1024;
 
-static const Name ASYNCIFY_STATE = "__asyncify_state";
-static const Name ASYNCIFY_GET_STATE = "asyncify_get_state";
-static const Name ASYNCIFY_DATA = "__asyncify_data";
-static const Name ASYNCIFY_START_UNWIND = "asyncify_start_unwind";
-static const Name ASYNCIFY_STOP_UNWIND = "asyncify_stop_unwind";
-static const Name ASYNCIFY_START_REWIND = "asyncify_start_rewind";
-static const Name ASYNCIFY_STOP_REWIND = "asyncify_stop_rewind";
-static const Name ASYNCIFY_UNWIND = "__asyncify_unwind";
+// Snapify memory layouts
+enum class SnapifyMemoryLayout : int32_t {
+  STACK_START = 24,
+  STACK_END = 8192,
+  GLOBAL_START = 16384,
+  GLOBAL_END = 20480,
+  TABLE_START = 32768,
+  TABLE_END = 40960
+};
+
+static const int32_t STACK_ALIGN = 4;
+
+// static const Name ASYNCIFY_STATE = "__asyncify_state";
+// static const Name ASYNCIFY_GET_STATE = "asyncify_get_state";
+// static const Name ASYNCIFY_DATA = "__asyncify_data";
+// static const Name ASYNCIFY_START_UNWIND = "asyncify_start_unwind";
+// static const Name ASYNCIFY_STOP_UNWIND = "asyncify_stop_unwind";
+// static const Name ASYNCIFY_START_REWIND = "asyncify_start_rewind";
+// static const Name ASYNCIFY_STOP_REWIND = "asyncify_stop_rewind";
+// static const Name ASYNCIFY_UNWIND = "__asyncify_unwind";
 static const Name ASYNCIFY = "asyncify";
 static const Name START_UNWIND = "start_unwind";
 static const Name STOP_UNWIND = "stop_unwind";
 static const Name START_REWIND = "start_rewind";
 static const Name STOP_REWIND = "stop_rewind";
-
-// Extension
+// Functions newly added to Asyncify.
 static const Name GET_STATE = "get_state";
 static const Name SET_STATE = "set_state";
 
@@ -141,7 +155,10 @@ private:
 
   void addFunctions(Module* module) {
     synthesizeSnapifyMigrationPoint(module);
-    synthesizeStartRestore(module);
+    synthesizeSnapifyStartRestore(module);
+    // TODO: C/R globals and tables
+    // synthesizeSnapifyCheckpointGlobals(module);
+    // synthesizeSnapifyRestoreGlobals(module);
   }
 
   void synthesizeSnapifyMigrationPoint(Module* module) {
@@ -166,23 +183,23 @@ private:
     Type pointerType =
       module->getMemory(snapifyMemory)->is64() ? Type::i64 : Type::i32;
     auto unwindBlock = builder.makeBlock();
-    unwindBlock->list.push_back(
-      builder.makeStore(pointerType.getByteSize(),
-                        int(DataOffset::BStackPos),
-                        pointerType.getByteSize(),
-                        builder.makeConst(Literal(ASYNCIFY_METADATA_ADDRESS)),
-                        builder.makeConst(Literal(ASYNCIFY_STACK_START)),
-                        pointerType,
-                        snapifyMemory));
-    unwindBlock->list.push_back(
-      builder.makeStore(pointerType.getByteSize(),
-                        int(pointerType == Type::i64 ? DataOffset::BStackEnd64
-                                                     : DataOffset::BStackEnd),
-                        pointerType.getByteSize(),
-                        builder.makeConst(Literal(ASYNCIFY_METADATA_ADDRESS)),
-                        builder.makeConst(Literal(ASYNCIFY_STACK_END)),
-                        pointerType,
-                        snapifyMemory));
+    unwindBlock->list.push_back(builder.makeStore(
+      pointerType.getByteSize(),
+      int(DataOffset::BStackPos),
+      pointerType.getByteSize(),
+      builder.makeConst(Literal(ASYNCIFY_METADATA_ADDRESS)),
+      builder.makeConst(Literal(int32_t(SnapifyMemoryLayout::STACK_START))),
+      pointerType,
+      snapifyMemory));
+    unwindBlock->list.push_back(builder.makeStore(
+      pointerType.getByteSize(),
+      int(pointerType == Type::i64 ? DataOffset::BStackEnd64
+                                   : DataOffset::BStackEnd),
+      pointerType.getByteSize(),
+      builder.makeConst(Literal(ASYNCIFY_METADATA_ADDRESS)),
+      builder.makeConst(Literal(int32_t(SnapifyMemoryLayout::STACK_END))),
+      pointerType,
+      snapifyMemory));
     unwindBlock->list.push_back(
       builder.makeCall(START_UNWIND,
                        {builder.makeConst(Literal(ASYNCIFY_METADATA_ADDRESS))},
@@ -215,7 +232,9 @@ private:
     return f;
   }
 
-  void synthesizeStartRestore(Module* module) {
+  void synthesizeSnapifyStartRestore(Module* module) {
+    // TODO: We have to grow the main memory to make sure that it has the size
+    // of checkpointed memory.
     /*
     Synthesize snapify_start_restore function:
     ```js
@@ -234,6 +253,103 @@ private:
       Type::none));
     block->finalize(Type::none);
     f->body = block;
+  }
+
+  void synthesizeSnapifyCheckpointGlobals(Module* module) {
+    /*
+    Synthesize snapify_checkpoint_globals function:
+    ```js
+    function snapify_checkpoint_globals() {
+      // Store the globals in the snapify memory.
+      let pos = GLOBAL_START;
+      for (let i = 0; i < global_count; i++) {
+        if (global.isNotMutable(i)) {
+          continue;
+        }
+        store(pos, get_global(i));
+        pos += global_size;
+      }
+    }
+    ```
+    */
+    Builder builder(*module);
+    auto* f =
+      addFunction(module, SNAPIFY_CHECKPOINT_GLOBALS, Type::none, Type::none);
+    auto* block = builder.makeBlock();
+
+    // Iterate over all globals and store them in the snapify memory.
+    int32_t pos = int32_t(SnapifyMemoryLayout::GLOBAL_START);
+    for (auto& global : module->globals) {
+      assert(pos % STACK_ALIGN == 0);
+      if (pos > int32_t(SnapifyMemoryLayout::GLOBAL_END)) {
+        Fatal() << "Snapify: too many globals to fit in snapify memory";
+      }
+
+      if (global->mutable_) {
+        // Store the global in the snapify memory.
+        block->list.push_back(
+          builder.makeStore(global->type.getByteSize(),
+                            0,
+                            STACK_ALIGN,
+                            builder.makeConst(Literal(pos)),
+                            builder.makeGlobalGet(global->name, global->type),
+                            global->type,
+                            snapifyMemory));
+      }
+      pos += global->type.getByteSize();
+    }
+    block->finalize(Type::none);
+    f->body = block;
+    f->setName(SNAPIFY_CHECKPOINT_GLOBALS, false);
+  }
+
+  void synthesizeSnapifyRestoreGlobals(Module* module) {
+    /*
+    Synthesize snapify_restore_globals function:
+    ```js
+    function snapify_restore_globals() {
+      // Restore the globals from the snapify memory.
+      let pos = GLOBAL_START;
+      for (let i = 0; i < global_count; i++) {
+        if (global.isNotMutable(i)) {
+          continue;
+        }
+        set_global(i, load(pos, global_size));
+        pos += global_size;
+      }
+    }
+    ```
+    */
+    Builder builder(*module);
+    auto* f =
+      addFunction(module, SNAPIFY_RESTORE_GLOBALS, Type::none, Type::none);
+    auto* block = builder.makeBlock();
+
+    // Iterate over all globals and restore them from the snapify memory.
+    int32_t pos = int32_t(SnapifyMemoryLayout::GLOBAL_START);
+    for (auto& global : module->globals) {
+      assert(pos % STACK_ALIGN == 0);
+      if (pos > int32_t(SnapifyMemoryLayout::GLOBAL_END)) {
+        Fatal() << "Snapify: too many globals to fit in snapify memory";
+      }
+
+      if (global->mutable_) {
+        // Restore the global from the snapify memory.
+        block->list.push_back(builder.makeGlobalSet(
+          global->name,
+          builder.makeLoad(global->type.getByteSize(),
+                           false,
+                           0,
+                           STACK_ALIGN,
+                           builder.makeConst(Literal(pos)),
+                           global->type,
+                           snapifyMemory)));
+      }
+      pos += global->type.getByteSize();
+    }
+    block->finalize(Type::none);
+    f->body = block;
+    f->setName(SNAPIFY_RESTORE_GLOBALS, false);
   }
 
   void addGlobals(Module* module) {
