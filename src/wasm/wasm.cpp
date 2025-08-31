@@ -1883,6 +1883,13 @@ Tag* Module::addTag(std::unique_ptr<Tag>&& curr) {
 
 void Module::addStart(const Name& s) { start = s; }
 
+void Module::removeStart() {
+  if (!start.is()) {
+    Fatal() << "Module::RemoveStart: no start function";
+  }
+  start = Name();
+}
+
 template<typename Vector, typename Map>
 void removeModuleElement(Vector& v, Map& m, Name name) {
   m.erase(name);

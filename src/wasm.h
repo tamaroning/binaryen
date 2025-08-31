@@ -2610,6 +2610,7 @@ public:
   Tag* addTag(std::unique_ptr<Tag>&& curr);
 
   void addStart(const Name& s);
+  void removeStart();
 
   void removeExport(Name name);
   void removeFunction(Name name);

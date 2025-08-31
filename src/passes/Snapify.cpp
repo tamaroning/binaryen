@@ -1,3 +1,33 @@
+// ## Snapify pass
+//
+// Wasmモジュールをcheckpoint/restore可能にするためのパス。
+// Wasmモジュールをsnapifyパスで変換した後にAsyncifyを適用する必要がある。
+// Snapify+Asyncifyを適用したモジュールは、
+//
+// ## 利用方法
+//
+// ランタイムは、fn snapify.should_checkpoint -> bool;をexportする必要がある。
+// その関数内で、チェックポイント要求の有無を返す処理を実装する(例えばPOSIXシグナルをトリガーにする)。
+// restoreをする場合は、snapify_start_restoreを呼び出してから_startを呼び出す。
+// (通常の実行では_startを呼び出すだけでよい。)
+//
+// ## 制約
+//
+// 現時点では以下の制約がある
+// - メモリは一つのみ
+// Todo
+// - C/R globals
+// - C/R tables
+//
+// テーブルはtable.set直前にglobal.setを挿入することでC/R可能。(しかしオーバーヘッドが発生する)
+//
+// ## 仕組み
+// -
+// Wasmプログラム内の関数の先頭とループの先頭にマイグレーションポイント(migration_point)を挿入する。
+// migration_pointではチェックポイント時には、asyncify_start_unwindを呼び出し、リストア時にはasyncify_stop_rewindを呼び出す。
+// start_restoreは、内部でasyncify_start_rewindを呼び出す。
+//
+
 #include "asmjs/shared-constants.h"
 #include "ir/iteration.h"
 #include "ir/memory-utils.h"
@@ -113,6 +143,8 @@ public:
     addGlobals(module);
 
     MigrationPointInserter().walkModule(module);
+
+    renameStartFunction(module);
   }
 
 private:
@@ -363,6 +395,22 @@ private:
     global->module = mod;
     global->base = name;
     module->addGlobal(std::move(global));
+  }
+
+  void renameStartFunction(Module* module) {
+    // start functionがある場合は"_start"にrenameして削除
+    if (module->start.is()) {
+      auto* startFunc = module->getFunction(module->start);
+      if (!startFunc->imported() && startFunc->body->is<Nop>()) {
+        // Do nothing if there is no the start function.
+      } else {
+        // if there is a start function, rename it to "_start" and export it
+        startFunc->setName(Name("_start"), true);
+        module->addExport(Builder(*module).makeExport(
+          "_start", startFunc->name, ExternalKind::Function));
+      }
+      module->removeStart();
+    }
   }
 };
 
