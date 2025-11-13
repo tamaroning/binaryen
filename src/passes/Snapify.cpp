@@ -66,7 +66,7 @@ static const Name SNAPIFY_RESTORE_GLOBALS = "snapify_restore_globals";
 static const Name SNAPIFY_CHECKPOINT_TABLES = "snapify_checkpoint_tables";
 static const Name SNAPIFY_RESTORE_TABLES = "snapify_restore_tables";
 
-static const std::string_view KAFU_DEST_PREFIX = "__kafu_dest_";
+static const std::string_view KAFU_DEST_PREFIX = ".kafu_dest.";
 
 static const int32_t ASYNCIFY_METADATA_ADDRESS = 16;
 enum class DataOffset { BStackPos = 0, BStackEnd = 4, BStackEnd64 = 8 };
@@ -112,11 +112,48 @@ static const Name SET_STATE = "set_state";
 //       size, but make debugging harder
 enum class State { Normal = 0, Unwinding = 1, Rewinding = 2 };
 
+class KafuMetadata {
+public:
+  KafuMetadata(Module* module) {
+    // Clang cannot generate custom sections and can only generate data
+    // segments.
+    for (const auto& dataSegment : module->dataSegments) {
+      std::cout << "Data segment: " << dataSegment->name << std::endl;
+      if (dataSegment->name.startsWith(KAFU_DEST_PREFIX)) {
+        // Parse .kafu_dest.ident.dest format.
+        const auto& name = dataSegment->name;
+        auto suffix = name.toString().substr(KAFU_DEST_PREFIX.size());
+        auto dotPos = suffix.find('.');
+        if (dotPos == std::string::npos) {
+          Fatal() << "Invalid kafu dest name: " << suffix;
+        }
+        auto ident = suffix.substr(0, dotPos);
+        auto dest = suffix.substr(dotPos + 1);
+        kafuDests[ident] = dest;
+        std::cout << "Kafu dest: " << ident << " -> " << dest << std::endl;
+
+        CustomSection s;
+        s.name = dataSegment->name.toString();
+        s.data = dataSegment->data;
+        module->customSections.push_back(s);
+      }
+    }
+  }
+
+  bool isKafuDestFunction(const Function* curr) const {
+    return kafuDests.find(curr->name) != kafuDests.end();
+  }
+
+private:
+  std::map<Name, std::string> kafuDests;
+};
+
 struct MigrationPointInserter
   : public WalkerPass<PostWalker<MigrationPointInserter>> {
 public:
-  MigrationPointInserter(MigrationPolicy migrationPolicy)
-    : migrationPolicy(migrationPolicy) {}
+  MigrationPointInserter(MigrationPolicy migrationPolicy,
+                         KafuMetadata kafuMetadata)
+    : migrationPolicy(migrationPolicy), kafuMetadata(kafuMetadata) {}
 
   // This inserts a migration point at the beginning of each
   // function.
@@ -144,7 +181,7 @@ public:
     }
 
     else if (migrationPolicy == MigrationPolicy::KAFU &&
-             isKafuDestFunction(curr)) {
+             kafuMetadata.isKafuDestFunction(curr)) {
       Builder builder(*getModule());
       const auto call =
         builder.makeCall(SNAPIFY_MIGRATION_POINT,
@@ -172,30 +209,12 @@ public:
 
 private:
   const MigrationPolicy migrationPolicy;
+  const KafuMetadata kafuMetadata;
 
   int funcIdx = 0;
 
   bool isSynthesizedFunction(Name& name) {
     return name == SNAPIFY_MIGRATION_POINT || name == SNAPIFY_START_RESTORE;
-  }
-
-  bool isKafuDestFunction(Function* curr) {
-    bool isKafuDestFunction = false;
-
-    // FIXME: これexport nameが複数あると動かなくない?
-    auto* module = this->getModule();
-    for (auto& export_ : module->exports) {
-      Name* export_name = export_->getInternalName();
-      if (export_name != nullptr) {
-        if (export_->kind == ExternalKind::Function &&
-            *export_name == curr->name) {
-          if (export_->name.startsWith(KAFU_DEST_PREFIX)) {
-            isKafuDestFunction = true;
-          }
-        }
-      }
-    }
-    return isKafuDestFunction;
   }
 };
 
@@ -230,7 +249,8 @@ public:
     addFunctions(module);
     addGlobals(module);
 
-    MigrationPointInserter(migrationPolicy).walkModule(module);
+    KafuMetadata kafuMetadata(module);
+    MigrationPointInserter(migrationPolicy, kafuMetadata).walkModule(module);
 
     renameStartFunction(module);
   }
