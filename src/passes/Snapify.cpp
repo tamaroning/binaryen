@@ -3,7 +3,8 @@
 // Wasmモジュールをcheckpoint/restore可能にするためのパス。
 // 以下のコマンドでWasmモジュールをSnapifyパスで変換した後にAsyncifyを適用することができる。
 //
-// $(WASM_OPT) $$wasm -O1 --enable-multimemory --snapify -o $$output
+// $(WASM_OPT) $$wasm -O1 --enable-multimemory --snapify
+// --pass-arg=policy=always -o $$output
 // $(WASM_OPT) $$output -O1 --asyncify --pass-arg=asyncify-memory@snapify_memory
 // --enable-multimemory -o $$output
 //
@@ -31,11 +32,14 @@
 // start_restoreは、内部でasyncify_start_rewindを呼び出す。
 //
 // ## Migration Policy
-// - ALWAYS:
+// - always (default):
 // すべての関数とループの先頭にマイグレーションポイント(mirgation_point(callerIdx))を挿入する。
-// - KAFU:
+// - kafu:
 // Kafuのdest関数の先頭にマイグレーションポイント(migration_point(callerIdx))を挿入する。
 //
+// ## Todo
+// - C/R tables
+// - C/R tables
 
 #include "asmjs/shared-constants.h"
 #include "ir/iteration.h"
@@ -110,6 +114,9 @@ enum class State { Normal = 0, Unwinding = 1, Rewinding = 2 };
 
 struct MigrationPointInserter
   : public WalkerPass<PostWalker<MigrationPointInserter>> {
+public:
+  MigrationPointInserter(MigrationPolicy migrationPolicy)
+    : migrationPolicy(migrationPolicy) {}
 
   // This inserts a migration point at the beginning of each
   // function.
@@ -162,8 +169,7 @@ struct MigrationPointInserter
   }
 
 private:
-  // TODO: これを引数から受け取れるようにする
-  const MigrationPolicy migrationPolicy = MigrationPolicy::ALWAYS;
+  const MigrationPolicy migrationPolicy;
 
   int funcIdx = 0;
 
@@ -196,6 +202,16 @@ public:
   bool addsEffects() override { return true; }
 
   void run(Module* module) override {
+    auto stateChangingImports = getArgumentOrDefault("policy", "always");
+    MigrationPolicy migrationPolicy = MigrationPolicy::ALWAYS;
+    if (stateChangingImports == "always") {
+      migrationPolicy = MigrationPolicy::ALWAYS;
+    } else if (stateChangingImports == "kafu") {
+      migrationPolicy = MigrationPolicy::KAFU;
+    } else {
+      Fatal() << "Invalid migration policy: " << stateChangingImports;
+    }
+
     // Ensure the module contains a single memory.
     if (module->memories.size() != 1) {
       Fatal() << "Snapify requires a single memory in the module";
@@ -211,7 +227,7 @@ public:
     addFunctions(module);
     addGlobals(module);
 
-    MigrationPointInserter().walkModule(module);
+    MigrationPointInserter(migrationPolicy).walkModule(module);
 
     renameStartFunction(module);
   }
