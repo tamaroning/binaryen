@@ -1,8 +1,11 @@
-// ## Snapify pass
+// # Snapify pass
 //
 // Wasmモジュールをcheckpoint/restore可能にするためのパス。
-// Wasmモジュールをsnapifyパスで変換した後にAsyncifyを適用する必要がある。
-// Snapify+Asyncifyを適用したモジュールは、
+// 以下のコマンドでWasmモジュールをSnapifyパスで変換した後にAsyncifyを適用することができる。
+//
+// $(WASM_OPT) $$wasm -O1 --enable-multimemory --snapify -o $$output
+// $(WASM_OPT) $$output -O1 --asyncify --pass-arg=asyncify-memory@snapify_memory
+// --enable-multimemory -o $$output
 //
 // ## 利用方法
 //
@@ -26,6 +29,12 @@
 // Wasmプログラム内の関数の先頭とループの先頭にマイグレーションポイント(migration_point)を挿入する。
 // migration_pointではチェックポイント時には、asyncify_start_unwindを呼び出し、リストア時にはasyncify_stop_rewindを呼び出す。
 // start_restoreは、内部でasyncify_start_rewindを呼び出す。
+//
+// ## Migration Policy
+// - ALWAYS:
+// すべての関数とループの先頭にマイグレーションポイント(mirgation_point)を挿入する。
+// - KAFU:
+// Kafuのdest関数の先頭にマイグレーションポイント(migration_point)を挿入する。
 //
 
 #include "asmjs/shared-constants.h"
@@ -53,6 +62,8 @@ static const Name SNAPIFY_RESTORE_GLOBALS = "snapify_restore_globals";
 static const Name SNAPIFY_CHECKPOINT_TABLES = "snapify_checkpoint_tables";
 static const Name SNAPIFY_RESTORE_TABLES = "snapify_restore_tables";
 
+static const std::string_view KAFU_DEST_PREFIX = "__kafu_dest_";
+
 static const int32_t ASYNCIFY_METADATA_ADDRESS = 16;
 enum class DataOffset { BStackPos = 0, BStackEnd = 4, BStackEnd64 = 8 };
 
@@ -67,6 +78,14 @@ enum class SnapifyMemoryLayout : int32_t {
 };
 
 static const int32_t STACK_ALIGN = 4;
+
+// Policy to insert migration points.
+enum class MigrationPolicy : int32_t {
+  // beginnig of each function and loop body.
+  ALWAYS = 0,
+  // For integration with Kafu.
+  KAFU = 1,
+};
 
 // static const Name ASYNCIFY_STATE = "__asyncify_state";
 // static const Name ASYNCIFY_GET_STATE = "asyncify_get_state";
@@ -89,36 +108,78 @@ static const Name SET_STATE = "set_state";
 //       size, but make debugging harder
 enum class State { Normal = 0, Unwinding = 1, Rewinding = 2 };
 
-bool isSynthesizedFunction(Name& name) {
-  return name == SNAPIFY_MIGRATION_POINT || name == SNAPIFY_START_RESTORE;
-}
-
 struct MigrationPointInserter
   : public WalkerPass<PostWalker<MigrationPointInserter>> {
+
+  // This inserts a migration point at the beginning of each
+  // function.
   void visitFunction(Function* curr) {
     // if this is imported, we don't need to do anything
     if (curr->imported()) {
       return;
     }
-    // we don't need to insert a migration point in the migration point
+    // we don't need to insert a migration point for functions synthesized by
+    // Snapify.
     if (isSynthesizedFunction(curr->name)) {
       return;
     }
 
-    // insert a migration point at the begeninng of each function
-    Builder builder(*getModule());
-    const auto call = builder.makeCall(SNAPIFY_MIGRATION_POINT, {}, Type::none);
-    const auto newBody = builder.makeSequence(call, curr->body);
+    if (migrationPolicy == MigrationPolicy::ALWAYS) {
+      Builder builder(*getModule());
+      const auto call =
+        builder.makeCall(SNAPIFY_MIGRATION_POINT, {}, Type::none);
+      const auto newBody = builder.makeSequence(call, curr->body);
 
-    curr->body = newBody;
+      curr->body = newBody;
+    }
+
+    else if (migrationPolicy == MigrationPolicy::KAFU &&
+             isKafuDestFunction(curr)) {
+      Builder builder(*getModule());
+      const auto call =
+        builder.makeCall(SNAPIFY_MIGRATION_POINT, {}, Type::none);
+      const auto newBody = builder.makeSequence(call, curr->body);
+
+      curr->body = newBody;
+    }
   }
 
+  // This inserts a migration point at the beginning of each loop.
   void visitLoop(Loop* curr) {
-    // insert a safepoint call at the beginning of each loop
-    Builder builder(*getModule());
-    const auto call = builder.makeCall(SNAPIFY_MIGRATION_POINT, {}, Type::none);
-    const auto newBody = builder.makeSequence(call, curr->body);
-    curr->body = newBody;
+    if (migrationPolicy == MigrationPolicy::ALWAYS) {
+      Builder builder(*getModule());
+      const auto call =
+        builder.makeCall(SNAPIFY_MIGRATION_POINT, {}, Type::none);
+      const auto newBody = builder.makeSequence(call, curr->body);
+      curr->body = newBody;
+    }
+  }
+
+private:
+  // TODO: これを引数から受け取れるようにする
+  const MigrationPolicy migrationPolicy = MigrationPolicy::ALWAYS;
+
+  bool isSynthesizedFunction(Name& name) {
+    return name == SNAPIFY_MIGRATION_POINT || name == SNAPIFY_START_RESTORE;
+  }
+
+  bool isKafuDestFunction(Function* curr) {
+    bool isKafuDestFunction = false;
+
+    // FIXME: これexport nameが複数あると動かなくない?
+    auto* module = this->getModule();
+    for (auto& export_ : module->exports) {
+      Name* export_name = export_->getInternalName();
+      if (export_name != nullptr) {
+        if (export_->kind == ExternalKind::Function &&
+            *export_name == curr->name) {
+          if (export_->name.startsWith(KAFU_DEST_PREFIX)) {
+            isKafuDestFunction = true;
+          }
+        }
+      }
+    }
+    return isKafuDestFunction;
   }
 };
 
