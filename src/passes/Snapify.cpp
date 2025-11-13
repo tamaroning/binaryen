@@ -4,7 +4,7 @@
 // 以下のコマンドでWasmモジュールをSnapifyパスで変換した後にAsyncifyを適用することができる。
 //
 // $(WASM_OPT) $$wasm -O1 --enable-multimemory --snapify
-// --pass-arg=policy=always -o $$output
+// --pass-arg=policy@always -o $$output
 // $(WASM_OPT) $$output -O1 --asyncify --pass-arg=asyncify-memory@snapify_memory
 // --enable-multimemory -o $$output
 //
@@ -162,7 +162,9 @@ public:
     if (migrationPolicy == MigrationPolicy::ALWAYS) {
       Builder builder(*getModule());
       const auto call =
-        builder.makeCall(SNAPIFY_MIGRATION_POINT, {}, Type::none);
+        builder.makeCall(SNAPIFY_MIGRATION_POINT,
+                         {builder.makeConst(Literal(int32_t(funcIdx)))},
+                         Type::none);
       const auto newBody = builder.makeSequence(call, curr->body);
       curr->body = newBody;
     }
@@ -202,15 +204,16 @@ public:
   bool addsEffects() override { return true; }
 
   void run(Module* module) override {
-    auto stateChangingImports = getArgumentOrDefault("policy", "always");
+    auto migrationPolicyArg = getArgumentOrDefault("policy", "always");
     MigrationPolicy migrationPolicy = MigrationPolicy::ALWAYS;
-    if (stateChangingImports == "always") {
+    if (migrationPolicyArg == "always") {
       migrationPolicy = MigrationPolicy::ALWAYS;
-    } else if (stateChangingImports == "kafu") {
+    } else if (migrationPolicyArg == "kafu") {
       migrationPolicy = MigrationPolicy::KAFU;
     } else {
-      Fatal() << "Invalid migration policy: " << stateChangingImports;
+      Fatal() << "Invalid migration policy: " << migrationPolicyArg;
     }
+    std::cout << "Migration policy: " << migrationPolicyArg << std::endl;
 
     // Ensure the module contains a single memory.
     if (module->memories.size() != 1) {
@@ -236,7 +239,8 @@ private:
   Name snapifyMemory;
 
   void AddSnapifyImports(Module* module) {
-    addImportFunction(module, SNAPIFY, SHOULD_CHECKPOINT, {}, Type::i32);
+    addImportFunction(
+      module, SNAPIFY, SHOULD_CHECKPOINT, {Type::i32}, Type::i32);
   }
 
   void addAsyncifyImports(Module* module) {
