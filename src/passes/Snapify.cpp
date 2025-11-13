@@ -32,9 +32,9 @@
 //
 // ## Migration Policy
 // - ALWAYS:
-// すべての関数とループの先頭にマイグレーションポイント(mirgation_point)を挿入する。
+// すべての関数とループの先頭にマイグレーションポイント(mirgation_point(callerIdx))を挿入する。
 // - KAFU:
-// Kafuのdest関数の先頭にマイグレーションポイント(migration_point)を挿入する。
+// Kafuのdest関数の先頭にマイグレーションポイント(migration_point(callerIdx))を挿入する。
 //
 
 #include "asmjs/shared-constants.h"
@@ -116,20 +116,23 @@ struct MigrationPointInserter
   void visitFunction(Function* curr) {
     // if this is imported, we don't need to do anything
     if (curr->imported()) {
+      funcIdx++;
       return;
     }
     // we don't need to insert a migration point for functions synthesized by
     // Snapify.
     if (isSynthesizedFunction(curr->name)) {
+      funcIdx++;
       return;
     }
 
     if (migrationPolicy == MigrationPolicy::ALWAYS) {
       Builder builder(*getModule());
       const auto call =
-        builder.makeCall(SNAPIFY_MIGRATION_POINT, {}, Type::none);
+        builder.makeCall(SNAPIFY_MIGRATION_POINT,
+                         {builder.makeConst(Literal(int32_t(funcIdx)))},
+                         Type::none);
       const auto newBody = builder.makeSequence(call, curr->body);
-
       curr->body = newBody;
     }
 
@@ -137,11 +140,14 @@ struct MigrationPointInserter
              isKafuDestFunction(curr)) {
       Builder builder(*getModule());
       const auto call =
-        builder.makeCall(SNAPIFY_MIGRATION_POINT, {}, Type::none);
+        builder.makeCall(SNAPIFY_MIGRATION_POINT,
+                         {builder.makeConst(Literal(int32_t(funcIdx)))},
+                         Type::none);
       const auto newBody = builder.makeSequence(call, curr->body);
-
       curr->body = newBody;
     }
+
+    funcIdx++;
   }
 
   // This inserts a migration point at the beginning of each loop.
@@ -158,6 +164,8 @@ struct MigrationPointInserter
 private:
   // TODO: これを引数から受け取れるようにする
   const MigrationPolicy migrationPolicy = MigrationPolicy::ALWAYS;
+
+  int funcIdx = 0;
 
   bool isSynthesizedFunction(Name& name) {
     return name == SNAPIFY_MIGRATION_POINT || name == SNAPIFY_START_RESTORE;
@@ -258,8 +266,8 @@ private:
     /*
     Synthesize snapify_migration_point function:
     ```js
-    function snapify_migration_point() {
-      if (snapify_should_checkpoint()) {
+    function snapify_migration_point(int32_t function_index) {
+      if (snapify_should_checkpoint(function_index)) {
         // unwind the stack
         store(ASYNCIFY_METADATA_ADDRESS + BStackPos, ASYNCIFY_STACK_START);
         store(ASYNCIFY_METADATA_ADDRESS + BStackEnd, ASYNCIFY_STACK_END);
@@ -272,7 +280,7 @@ private:
     */
     Builder builder(*module);
     Function* f =
-      addFunction(module, SNAPIFY_MIGRATION_POINT, Type::none, Type::none);
+      addFunction(module, SNAPIFY_MIGRATION_POINT, {Type::i32}, Type::none);
     Type pointerType =
       module->getMemory(snapifyMemory)->is64() ? Type::i64 : Type::i32;
     auto unwindBlock = builder.makeBlock();
@@ -301,7 +309,9 @@ private:
 
     auto* checkState = builder.makeIf(
       builder.makeBinary(EqInt32,
-                         builder.makeCall(SHOULD_CHECKPOINT, {}, Type::i32),
+                         builder.makeCall(SHOULD_CHECKPOINT,
+                                          {builder.makeLocalGet(0, Type::i32)},
+                                          Type::i32),
                          builder.makeConst(Literal(int32_t(1)))),
 
       unwindBlock,
