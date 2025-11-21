@@ -118,7 +118,6 @@ public:
     // Clang cannot generate custom sections and can only generate data
     // segments.
     for (const auto& dataSegment : module->dataSegments) {
-      std::cout << "Data segment: " << dataSegment->name << std::endl;
       if (dataSegment->name.startsWith(KAFU_DEST_PREFIX)) {
         // Parse .kafu_dest.ident.dest format.
         const auto& name = dataSegment->name;
@@ -130,7 +129,6 @@ public:
         auto ident = suffix.substr(0, dotPos);
         auto dest = suffix.substr(dotPos + 1);
         kafuDests[ident] = dest;
-        std::cout << "Kafu dest: " << ident << " -> " << dest << std::endl;
 
         CustomSection s;
         s.name = dataSegment->name.toString();
@@ -211,7 +209,11 @@ private:
   const MigrationPolicy migrationPolicy;
   const KafuMetadata kafuMetadata;
 
-  int funcIdx = 0;
+  // NOTE:
+  // snapify_migration_pointはimportとして追加され、module->functionsの最後に追加される。
+  // functionIdxはimportを含めた関数の数をカウントしなければならず、1から始める。
+  // (したがって、このclass内で、import関数のfuncIdxは1ずれる可能性があることに注意)
+  int funcIdx = 1;
 
   bool isSynthesizedFunction(Name& name) {
     return name == SNAPIFY_MIGRATION_POINT || name == SNAPIFY_START_RESTORE;
@@ -232,7 +234,6 @@ public:
     } else {
       Fatal() << "Invalid migration policy: " << migrationPolicyArg;
     }
-    std::cout << "Migration policy: " << migrationPolicyArg << std::endl;
 
     // Ensure the module contains a single memory.
     if (module->memories.size() != 1) {
