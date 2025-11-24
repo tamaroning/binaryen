@@ -40,6 +40,46 @@
 // ## Todo
 // - C/R tables
 // - C/R tables
+//
+// ## 仕様
+// ### 線形メモリ
+// - main_memory: 通常の実行で使われるメモリ
+// - snapify_memory: asyncifyのスタックとグローバル変数の保存先
+//
+// ### Import関数
+// - asyncify_start_unwind(int32_t metadataAddress):
+// スタックをアンワインドする。
+// - asyncify.stop_rewind(): リワインドを停止する。
+// - asyncify.start_rewind(int32_t metadataAddress): リワインドを開始する。
+// - asyncify.stop_rewind(): リワインドを停止する。
+// - asyncify.get_state(): 現在のAsyncify状態を取得する。
+// - asyncify.set_state(int32_t state): Asyncify状態を設定する。
+// - snapify.should_checkpoint():
+// チェックポイントを要求するかどうかを取得する。(ユーザーが実装する必要あり)
+//
+// ### 合成される関数
+// - snapify_migration_point(int32_t callerIdx):
+// マイグレーションポイントに挿入される。
+// - snapify_start_restore():
+// リストアを開始する。(ユーザーが明示的に呼び出す必要あり)
+// - snapify_checkpoint_globals():
+// グローバル変数をasyncify_memoryに保存する。(ユーザーが明示的に呼び出す必要あり)
+// - snapify_restore_globals():
+// グローバル変数をasyncify_memoryから復元する。(ユーザーが明示的に呼び出す必要あり)
+//
+// ### チェックポイントの手順
+// 1. _startを呼び出す (実行開始)
+// 2. snapify.should_checkpointが1を返すと、スタックがアンワインドされて実行終了
+// 3. snapify.checkpoint_globalsを呼び出す
+// 4. ランタイム側でmain_memoryとsnapify_memoryを保存する
+//
+// ### リストアの手順
+// 1.
+// ランタイム側でmain_memoryとsnapify_memoryをWasmモジュールのインスタンスに読み込む
+// 2. snapify_start_restoreを呼び出す
+// 3. snapify_restore_globalsを呼び出す
+// 4. _startを呼び出す
+//
 
 #include "asmjs/shared-constants.h"
 #include "ir/iteration.h"
@@ -49,6 +89,7 @@
 #include "ir/utils.h"
 #include "wasm.h"
 #include <cassert>
+#include <memory>
 #include <pass.h>
 #include <wasm-builder.h>
 #include <wasm-traversal.h>
@@ -67,6 +108,7 @@ static const Name SNAPIFY_CHECKPOINT_TABLES = "snapify_checkpoint_tables";
 static const Name SNAPIFY_RESTORE_TABLES = "snapify_restore_tables";
 
 static const std::string_view KAFU_DEST_PREFIX = ".kafu_dest.";
+static const std::string_view KAFU_OFFLOAD_PREFIX = ".kafu_offload.";
 
 static const int32_t ASYNCIFY_METADATA_ADDRESS = 16;
 enum class DataOffset { BStackPos = 0, BStackEnd = 4, BStackEnd64 = 8 };
@@ -112,6 +154,13 @@ static const Name SET_STATE = "set_state";
 //       size, but make debugging harder
 enum class State { Normal = 0, Unwinding = 1, Rewinding = 2 };
 
+bool isSynthesizedFunction(Name& name) {
+  return name == SNAPIFY_MIGRATION_POINT || name == SNAPIFY_START_RESTORE ||
+         name == SNAPIFY_CHECKPOINT_GLOBALS ||
+         name == SNAPIFY_RESTORE_GLOBALS;
+}
+
+// Read metadata from data segments attached by the kafu macros and add them as custom sections to the module.
 class KafuMetadata {
 public:
   KafuMetadata(Module* module) {
@@ -134,16 +183,87 @@ public:
         s.name = dataSegment->name.toString();
         s.data = dataSegment->data;
         module->customSections.push_back(s);
+      } else if (dataSegment->name.startsWith(KAFU_OFFLOAD_PREFIX)) {
+        // Parse .kafu_offload.ident.dest format.
+        const auto& name = dataSegment->name;
+        auto suffix = name.toString().substr(KAFU_OFFLOAD_PREFIX.size());
+        auto dotPos = suffix.find('.');
+        if (dotPos == std::string::npos) {
+          Fatal() << "Invalid kafu offload name: " << suffix;
+        }
+        auto ident = suffix.substr(0, dotPos);
+        auto dest = suffix.substr(dotPos + 1);
+
+        if (kafuOffloads.find(ident) == kafuOffloads.end()) {
+          kafuOffloads[ident] = std::vector<std::string>();
+        }
+        kafuOffloads[ident].push_back(dest);
+
+        CustomSection s;
+        s.name = dataSegment->name.toString();
+        s.data = dataSegment->data;
+        module->customSections.push_back(s);
       }
     }
+  }
+
+  std::vector<std::string> getKafuOffloads(const Name& ident) const {
+    return kafuOffloads.find(ident) != kafuOffloads.end() ? kafuOffloads.at(ident) : std::vector<std::string>();
   }
 
   bool isKafuDestFunction(const Function* curr) const {
     return kafuDests.find(curr->name) != kafuDests.end();
   }
 
+  bool isKafuOffloadFunction(const Function* curr) const {
+    return kafuOffloads.find(curr->name) != kafuOffloads.end();
+  }
+
 private:
   std::map<Name, std::string> kafuDests;
+  std::map<Name, std::vector<std::string>> kafuOffloads;
+};
+
+// Kafu destがついている関数f(...)に対して、import関数kafu_remote.f(i32 callerIdx, ...)を追加する
+class KafuRpcGenerator  : public WalkerPass<PostWalker<KafuRpcGenerator>>{
+public:
+  KafuRpcGenerator(MigrationPolicy migrationPolicy, Module* module, KafuMetadata kafuMetadata) : migrationPolicy(migrationPolicy), kafuMetadata(kafuMetadata)
+  {}
+
+  void visitFunction(Function* curr) {
+    if (migrationPolicy != MigrationPolicy::KAFU) {
+      return;
+    }
+    if (curr->imported()) {
+      return;
+    }
+    if (isSynthesizedFunction(curr->name)) {
+      return;
+    }
+    if (!kafuMetadata.isKafuDestFunction(curr)) {
+      return;
+    }
+
+    Builder builder(*getModule());
+    Tuple newParams = {Type::i32};
+    for (auto param : curr->getParams()) {
+      newParams.push_back(param);
+    }
+    // TODO: export nameを使うべき? シンボル削除すると壊れる
+    auto internalName = std::string("kafu_remote_") + curr->name.toString();
+    auto import = builder.makeFunction(internalName, Signature(newParams, Type::none), {});
+    import->module = "kafu_remote";
+    import->base = curr->name;
+    rpcFunctions.push_back(std::move(import));
+  }
+
+  std::vector<std::unique_ptr<Function>> getRpcFunctions() {
+    return std::move(rpcFunctions);
+  }
+private:
+  const MigrationPolicy migrationPolicy;
+  KafuMetadata kafuMetadata;
+  std::vector<std::unique_ptr<Function>> rpcFunctions;
 };
 
 struct MigrationPointInserter
@@ -151,7 +271,7 @@ struct MigrationPointInserter
 public:
   MigrationPointInserter(MigrationPolicy migrationPolicy,
                          KafuMetadata kafuMetadata)
-    : migrationPolicy(migrationPolicy), kafuMetadata(kafuMetadata) {}
+    : migrationPolicy(migrationPolicy), kafuMetadata(kafuMetadata), funcIdx(1) {}
 
   // This inserts a migration point at the beginning of each
   // function.
@@ -213,11 +333,7 @@ private:
   // snapify_migration_pointはimportとして追加され、module->functionsの最後に追加される。
   // functionIdxはimportを含めた関数の数をカウントしなければならず、1から始める。
   // (したがって、このclass内で、import関数のfuncIdxは1ずれる可能性があることに注意)
-  int funcIdx = 1;
-
-  bool isSynthesizedFunction(Name& name) {
-    return name == SNAPIFY_MIGRATION_POINT || name == SNAPIFY_START_RESTORE;
-  }
+  int funcIdx;
 };
 
 class Snapify : public Pass {
@@ -251,6 +367,12 @@ public:
     addGlobals(module);
 
     KafuMetadata kafuMetadata(module);
+    auto generator = KafuRpcGenerator(migrationPolicy, module, kafuMetadata);
+    generator.walkModule(module);
+    auto kafuRpcFunctions = generator.getRpcFunctions();
+    for (auto& func : kafuRpcFunctions) {
+      module->addFunction(std::move(func));
+    }
     MigrationPointInserter(migrationPolicy, kafuMetadata).walkModule(module);
 
     renameStartFunction(module);
@@ -296,11 +418,14 @@ private:
   }
 
   void addFunctions(Module* module) {
+    // Add the snapify_migration_point function.
     synthesizeSnapifyMigrationPoint(module);
+    // Add the snapify_start_restore function.
     synthesizeSnapifyStartRestore(module);
-    // TODO: C/R globals and tables
-    // synthesizeSnapifyCheckpointGlobals(module);
-    // synthesizeSnapifyRestoreGlobals(module);
+    // Add the snapify_checkpoint_globals function.
+    synthesizeSnapifyCheckpointGlobals(module);
+    // Add the snapify_restore_globals function.
+    synthesizeSnapifyRestoreGlobals(module);
   }
 
   void synthesizeSnapifyMigrationPoint(Module* module) {
