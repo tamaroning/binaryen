@@ -80,6 +80,10 @@
 // 3. snapify_restore_globalsを呼び出す
 // 4. _startを呼び出す
 //
+// Kafu RPC generator
+// - kafu_destが付いている関数に対して、import関数kafu_remote.f(i32 callerIdx, ...)を追加する
+// - TODO: call f(args...) をすべて call kafu_remote.f(callerIdx, args...) に変換する
+// FIXME: funcIdxの計算が何が原因で1ずれるのかわからん, importのせいだと思ったが上を追加しても1のままなので違うっぽい
 
 #include "asmjs/shared-constants.h"
 #include "ir/iteration.h"
@@ -153,6 +157,11 @@ static const Name SET_STATE = "set_state";
 // TODO: having just normal/unwind_or_rewind would decrease code
 //       size, but make debugging harder
 enum class State { Normal = 0, Unwinding = 1, Rewinding = 2 };
+
+enum class InterruptReason: int32_t {
+  FUNC_ENTRY = 0,
+  FUNC_EXIT = 1,
+};
 
 bool isSynthesizedFunction(Name& name) {
   return name == SNAPIFY_MIGRATION_POINT || name == SNAPIFY_START_RESTORE ||
@@ -271,20 +280,18 @@ struct MigrationPointInserter
 public:
   MigrationPointInserter(MigrationPolicy migrationPolicy,
                          KafuMetadata kafuMetadata)
-    : migrationPolicy(migrationPolicy), kafuMetadata(kafuMetadata), funcIdx(1) {}
+    : migrationPolicy(migrationPolicy), kafuMetadata(kafuMetadata) {}
 
   // This inserts a migration point at the beginning of each
   // function.
   void visitFunction(Function* curr) {
     // if this is imported, we don't need to do anything
     if (curr->imported()) {
-      funcIdx++;
       return;
     }
     // we don't need to insert a migration point for functions synthesized by
     // Snapify.
     if (isSynthesizedFunction(curr->name)) {
-      funcIdx++;
       return;
     }
 
@@ -292,7 +299,7 @@ public:
       Builder builder(*getModule());
       const auto call =
         builder.makeCall(SNAPIFY_MIGRATION_POINT,
-                         {builder.makeConst(Literal(int32_t(funcIdx)))},
+                         {builder.makeConst(Literal(int32_t(InterruptReason::FUNC_ENTRY)))},
                          Type::none);
       const auto newBody = builder.makeSequence(call, curr->body);
       curr->body = newBody;
@@ -303,13 +310,11 @@ public:
       Builder builder(*getModule());
       const auto call =
         builder.makeCall(SNAPIFY_MIGRATION_POINT,
-                         {builder.makeConst(Literal(int32_t(funcIdx)))},
+                         {builder.makeConst(Literal(int32_t(InterruptReason::FUNC_ENTRY)))},
                          Type::none);
       const auto newBody = builder.makeSequence(call, curr->body);
       curr->body = newBody;
     }
-
-    funcIdx++;
   }
 
   // This inserts a migration point at the beginning of each loop.
@@ -318,7 +323,7 @@ public:
       Builder builder(*getModule());
       const auto call =
         builder.makeCall(SNAPIFY_MIGRATION_POINT,
-                         {builder.makeConst(Literal(int32_t(funcIdx)))},
+                         {builder.makeConst(Literal(int32_t(InterruptReason::FUNC_ENTRY)))},
                          Type::none);
       const auto newBody = builder.makeSequence(call, curr->body);
       curr->body = newBody;
@@ -328,12 +333,6 @@ public:
 private:
   const MigrationPolicy migrationPolicy;
   const KafuMetadata kafuMetadata;
-
-  // NOTE:
-  // snapify_migration_pointはimportとして追加され、module->functionsの最後に追加される。
-  // functionIdxはimportを含めた関数の数をカウントしなければならず、1から始める。
-  // (したがって、このclass内で、import関数のfuncIdxは1ずれる可能性があることに注意)
-  int funcIdx;
 };
 
 class Snapify : public Pass {
