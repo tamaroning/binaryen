@@ -234,6 +234,7 @@ private:
 };
 
 // Kafu destがついている関数f(...)に対して、import関数kafu_remote.f(i32 callerIdx, ...)を追加する
+/*
 class KafuRpcGenerator  : public WalkerPass<PostWalker<KafuRpcGenerator>>{
 public:
   KafuRpcGenerator(MigrationPolicy migrationPolicy, Module* module, KafuMetadata kafuMetadata) : migrationPolicy(migrationPolicy), kafuMetadata(kafuMetadata)
@@ -274,6 +275,7 @@ private:
   KafuMetadata kafuMetadata;
   std::vector<std::unique_ptr<Function>> rpcFunctions;
 };
+*/
 
 struct MigrationPointInserter
   : public WalkerPass<PostWalker<MigrationPointInserter>> {
@@ -307,6 +309,7 @@ public:
 
     else if (migrationPolicy == MigrationPolicy::KAFU &&
              kafuMetadata.isKafuDestFunction(curr)) {
+              // Insert a call to snapify_migration_point at the beginning of the function.
       Builder builder(*getModule());
       const auto call =
         builder.makeCall(SNAPIFY_MIGRATION_POINT,
@@ -314,7 +317,33 @@ public:
                          Type::none);
       const auto newBody = builder.makeSequence(call, curr->body);
       curr->body = newBody;
+    
+    /*
+      // Insert calls to snapify_migration_point before return instructions.
+      auto indices = std::vector<size_t>();
+      for (size_t i = 0; i < newBody->list.size(); ++i) {
+        if (newBody->list[i]->is<Return>()) {
+          indices.push_back(i);
+        }
+      }
+      // To prevent index shift, insert from the end.
+      for (auto it = indices.rbegin(); it != indices.rend(); ++it) {
+        auto call = builder.makeCall(SNAPIFY_MIGRATION_POINT,
+                                    {builder.makeConst(Literal(int32_t(InterruptReason::FUNC_EXIT)))},
+                                    Type::none);
+        newBody->list.insertAt(*it, call);
+      }
+
+      // Insert calls to snapify_migration_point at the end of the function.
+      auto call2 = builder.makeCall(SNAPIFY_MIGRATION_POINT,
+                                  {builder.makeConst(Literal(int32_t(InterruptReason::FUNC_EXIT)))},
+                                  Type::none);
+      // 最後はend命令なのでその直前に挿入する
+      newBody->list.insertAt(newBody->list.size() - 1, call2);
+      */
+      curr->body = newBody;
     }
+
   }
 
   // This inserts a migration point at the beginning of each loop.
@@ -329,6 +358,7 @@ public:
       curr->body = newBody;
     }
   }
+
 
 private:
   const MigrationPolicy migrationPolicy;
@@ -366,12 +396,12 @@ public:
     addGlobals(module);
 
     KafuMetadata kafuMetadata(module);
-    auto generator = KafuRpcGenerator(migrationPolicy, module, kafuMetadata);
-    generator.walkModule(module);
-    auto kafuRpcFunctions = generator.getRpcFunctions();
-    for (auto& func : kafuRpcFunctions) {
-      module->addFunction(std::move(func));
-    }
+    //auto generator = KafuRpcGenerator(migrationPolicy, module, kafuMetadata);
+    //generator.walkModule(module);
+    //auto kafuRpcFunctions = generator.getRpcFunctions();
+    //for (auto& func : kafuRpcFunctions) {
+    //  module->addFunction(std::move(func));
+    //}
     MigrationPointInserter(migrationPolicy, kafuMetadata).walkModule(module);
 
     renameStartFunction(module);
