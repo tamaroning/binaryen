@@ -1,6 +1,7 @@
 name: Create Release
 
 # Trigger whenever a tag is created/updated or when pushing to snapify branch
+# Can also be manually triggered from GitHub Actions UI
 
 on:
   push:
@@ -8,6 +9,7 @@ on:
       - snapify
     tags:
       - "*"
+  workflow_dispatch:
 
 permissions:
   contents: write
