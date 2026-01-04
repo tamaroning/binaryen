@@ -1,9 +1,11 @@
 name: Create Release
 
-# Trigger whenever a tag is created/updated
+# Trigger whenever a tag is created/updated or when pushing to snapify branch
 
 on:
   push:
+    branches:
+      - snapify
     tags:
       - "*"
 
