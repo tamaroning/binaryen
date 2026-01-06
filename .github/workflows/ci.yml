@@ -255,9 +255,8 @@ jobs:
       run: |
         ./alpine.sh ninja install
 
-    # FIXME: we preliminary disabled the test.
-    #- name: test
-    #  run: ./alpine.sh python3 ./check.py
+    - name: test
+      run: ./alpine.sh python3 ./check.py
 
   # Duplicates build-asan.  Please keep in sync
   build-ubsan:
