@@ -10,7 +10,7 @@
 //
 // ## 利用方法
 //
-// ランタイムは、fn snapify.should_checkpoint -> bool;をexportする必要がある。
+// ランタイムは、fn snapify.should_checkpoint(i32 reason) -> i32(=bool);をexportする必要がある。
 // その関数内で、チェックポイント要求の有無を返す処理を実装する(例えばPOSIXシグナルをトリガーにする)。
 // restoreをする場合は、snapify_start_restoreを呼び出してから_startを呼び出す。
 // (通常の実行では_startを呼び出すだけでよい。)
@@ -54,7 +54,7 @@
 // - asyncify.stop_rewind(): リワインドを停止する。
 // - asyncify.get_state(): 現在のAsyncify状態を取得する。
 // - asyncify.set_state(int32_t state): Asyncify状態を設定する。
-// - snapify.should_checkpoint():
+// - snapify.should_checkpoint(int32_t reason):
 // チェックポイントを要求するかどうかを取得する。(ユーザーが実装する必要あり)
 //
 // ### 合成される関数
@@ -443,6 +443,9 @@ private:
     auto import = builder.makeFunction(name, Signature(params, results), {});
     import->module = mod;
     import->base = name;
+    // Make sure the function type is inexact for imported functions
+    // Recent changes in the upstream for custom descriptors make the function type exact by default, which breaks module validation.
+    import->type = import->type.with(Inexact);
     module->addFunction(std::move(import));
   }
 
