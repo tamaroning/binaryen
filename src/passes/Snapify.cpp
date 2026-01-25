@@ -97,6 +97,7 @@
 #include "wasm.h"
 #include <cassert>
 #include <memory>
+#include <unordered_map>
 #include <pass.h>
 #include <wasm-builder.h>
 #include <wasm-traversal.h>
@@ -287,6 +288,19 @@ public:
                          KafuMetadata kafuMetadata)
     : migrationPolicy(migrationPolicy), kafuMetadata(kafuMetadata) {}
 
+  Index getOrCreateReturnValueTemp(Function* func, Type results) {
+    // Only meaningful for concrete result types.
+    assert(func);
+    assert(results.isConcrete());
+    auto it = returnValueTemps.find(func->name);
+    if (it != returnValueTemps.end()) {
+      return it->second;
+    }
+    Index tmp = Builder::addVar(func, results);
+    returnValueTemps[func->name] = tmp;
+    return tmp;
+  }
+
   bool shouldInstrument(Function* func) {
     switch (migrationPolicy) {
       case MigrationPolicy::ALWAYS:
@@ -336,7 +350,7 @@ public:
       // evaluating the returned value.)
       return;
     }
-    Index tmp = Builder::addVar(func, results);
+    Index tmp = getOrCreateReturnValueTemp(func, results);
     auto* set = builder.makeLocalSet(tmp, curr->value);
     auto* ret = builder.makeReturn(builder.makeLocalGet(tmp, results));
     replaceCurrent(builder.makeBlock({set, exitCall, ret}));
@@ -383,7 +397,7 @@ public:
 
     // Preserve the function result while still running exitCall.
     if (results.isConcrete()) {
-      Index tmp = Builder::addVar(curr, results);
+      Index tmp = getOrCreateReturnValueTemp(curr, results);
       auto* tee = builder.makeLocalTee(tmp, bodyWithEntry, results);
       auto* get = builder.makeLocalGet(tmp, results);
       curr->body = builder.makeBlock({tee, exitCall, get}, results);
@@ -413,6 +427,7 @@ public:
 private:
   const MigrationPolicy migrationPolicy;
   const KafuMetadata kafuMetadata;
+  std::unordered_map<Name, Index> returnValueTemps;
 };
 
 class Snapify : public Pass {
