@@ -33,9 +33,12 @@
 //
 // ## Migration Policy
 // - always (default):
-// すべての関数とループの先頭にマイグレーションポイント(mirgation_point(callerIdx))を挿入する。
+// 先頭にマイグレーションポイント(migration_point(reason=KAFU_FUNC_ENTRY))を挿入する。
+// 終了時にはマイグレーションポイント(migration_point(reason=KAFU_FUNC_EXIT))を挿入する。
 // - kafu:
-// Kafuのdest関数の先頭にマイグレーションポイント(migration_point(callerIdx))を挿入する。
+// Kafuのdest関数のみについて:
+// 先頭にマイグレーションポイント(migration_point(reason=KAFU_FUNC_ENTRY))を挿入する。
+// 終了時にはマイグレーションポイント(migration_point(reason=KAFU_FUNC_EXIT))を挿入する。
 //
 // ## Todo
 // - C/R tables
@@ -284,6 +287,61 @@ public:
                          KafuMetadata kafuMetadata)
     : migrationPolicy(migrationPolicy), kafuMetadata(kafuMetadata) {}
 
+  bool shouldInstrument(Function* func) {
+    switch (migrationPolicy) {
+      case MigrationPolicy::ALWAYS:
+        return true;
+      case MigrationPolicy::KAFU:
+        return kafuMetadata.isKafuDestFunction(func);
+    }
+    WASM_UNREACHABLE("invalid migration policy");
+  }
+
+  // Insert calls to snapify_migration_point immediately before every return.
+  void visitReturn(Return* curr) {
+    auto* func = getFunction();
+    if (!func) {
+      return;
+    }
+    // Imported functions have no body, and we don't instrument synthesized
+    // functions.
+    if (func->imported() || isSynthesizedFunction(func->name)) {
+      return;
+    }
+    if (!shouldInstrument(func)) {
+      return;
+    }
+
+    Builder builder(*getModule());
+    auto* exitCall =
+      builder.makeCall(SNAPIFY_MIGRATION_POINT,
+                       {builder.makeConst(
+                         Literal(int32_t(InterruptReason::FUNC_EXIT)))},
+                       Type::none);
+
+    if (!curr->value) {
+      // return;
+      replaceCurrent(builder.makeSequence(exitCall, curr));
+      return;
+    }
+
+    // Preserve evaluation order of the return value:
+    //   tmp = <value>; migration_point(exit); return tmp;
+    // Use the function result type for the local to avoid refined-type
+    // mismatches across different returns.
+    auto results = func->getResults();
+    if (!results.isConcrete()) {
+      // Extremely rare in practice. Avoid potentially reordering side effects.
+      // (We could still insert, but that would run the exit hook before
+      // evaluating the returned value.)
+      return;
+    }
+    Index tmp = Builder::addVar(func, results);
+    auto* set = builder.makeLocalSet(tmp, curr->value);
+    auto* ret = builder.makeReturn(builder.makeLocalGet(tmp, results));
+    replaceCurrent(builder.makeBlock({set, exitCall, ret}));
+  }
+
   // This inserts a migration point at the beginning of each
   // function.
   void visitFunction(Function* curr) {
@@ -297,52 +355,44 @@ public:
       return;
     }
 
-    if (migrationPolicy == MigrationPolicy::ALWAYS) {
-      Builder builder(*getModule());
-      const auto call =
-        builder.makeCall(SNAPIFY_MIGRATION_POINT,
-                         {builder.makeConst(Literal(int32_t(InterruptReason::FUNC_ENTRY)))},
-                         Type::none);
-      const auto newBody = builder.makeSequence(call, curr->body);
-      curr->body = newBody;
+    if (!shouldInstrument(curr)) {
+      return;
     }
 
-    else if (migrationPolicy == MigrationPolicy::KAFU &&
-             kafuMetadata.isKafuDestFunction(curr)) {
-              // Insert a call to snapify_migration_point at the beginning of the function.
-      Builder builder(*getModule());
-      const auto call =
-        builder.makeCall(SNAPIFY_MIGRATION_POINT,
-                         {builder.makeConst(Literal(int32_t(InterruptReason::FUNC_ENTRY)))},
-                         Type::none);
-      const auto newBody = builder.makeSequence(call, curr->body);
-      curr->body = newBody;
-    
-    /*
-      // Insert calls to snapify_migration_point before return instructions.
-      auto indices = std::vector<size_t>();
-      for (size_t i = 0; i < newBody->list.size(); ++i) {
-        if (newBody->list[i]->is<Return>()) {
-          indices.push_back(i);
-        }
-      }
-      // To prevent index shift, insert from the end.
-      for (auto it = indices.rbegin(); it != indices.rend(); ++it) {
-        auto call = builder.makeCall(SNAPIFY_MIGRATION_POINT,
-                                    {builder.makeConst(Literal(int32_t(InterruptReason::FUNC_EXIT)))},
-                                    Type::none);
-        newBody->list.insertAt(*it, call);
-      }
+    Builder builder(*getModule());
+    auto* entryCall =
+      builder.makeCall(SNAPIFY_MIGRATION_POINT,
+                       {builder.makeConst(
+                         Literal(int32_t(InterruptReason::FUNC_ENTRY)))},
+                       Type::none);
+    auto* bodyWithEntry = builder.makeSequence(entryCall, curr->body);
 
-      // Insert calls to snapify_migration_point at the end of the function.
-      auto call2 = builder.makeCall(SNAPIFY_MIGRATION_POINT,
-                                  {builder.makeConst(Literal(int32_t(InterruptReason::FUNC_EXIT)))},
-                                  Type::none);
-      // 最後はend命令なのでその直前に挿入する
-      newBody->list.insertAt(newBody->list.size() - 1, call2);
-      */
-      curr->body = newBody;
+    // Ensure the exit migration point runs when the function falls through to
+    // its end (i.e., no explicit return).
+    auto* exitCall =
+      builder.makeCall(SNAPIFY_MIGRATION_POINT,
+                       {builder.makeConst(
+                         Literal(int32_t(InterruptReason::FUNC_EXIT)))},
+                       Type::none);
+
+    auto results = curr->getResults();
+    if (results == Type::none) {
+      curr->body = builder.makeSequence(bodyWithEntry, exitCall);
+      return;
     }
+
+    // Preserve the function result while still running exitCall.
+    if (results.isConcrete()) {
+      Index tmp = Builder::addVar(curr, results);
+      auto* tee = builder.makeLocalTee(tmp, bodyWithEntry, results);
+      auto* get = builder.makeLocalGet(tmp, results);
+      curr->body = builder.makeBlock({tee, exitCall, get}, results);
+      return;
+    }
+
+    // If results are not concrete, we cannot safely preserve the value while
+    // inserting the end-of-function exit point.
+    curr->body = bodyWithEntry;
 
   }
 
