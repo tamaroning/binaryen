@@ -173,49 +173,50 @@ bool isSynthesizedFunction(Name& name) {
          name == SNAPIFY_RESTORE_GLOBALS;
 }
 
-// Read metadata from data segments attached by the kafu macros and add them as custom sections to the module.
+// Read metadata from custom sections attached by the kafu macros.
 class KafuMetadata {
 public:
   KafuMetadata(Module* module) {
-    // Clang cannot generate custom sections and can only generate data
-    // segments.
-    for (const auto& dataSegment : module->dataSegments) {
-      if (dataSegment->name.startsWith(KAFU_DEST_PREFIX)) {
+    auto startsWith = [](std::string_view s, std::string_view prefix) {
+      return s.size() >= prefix.size() &&
+             s.substr(0, prefix.size()) == prefix;
+    };
+
+    for (const auto& section : module->customSections) {
+      std::string_view name = section.name;
+
+      if (startsWith(name, KAFU_DEST_PREFIX)) {
         // Parse .kafu_dest.ident.dest format.
-        const auto& name = dataSegment->name;
-        auto suffix = name.toString().substr(KAFU_DEST_PREFIX.size());
+        auto suffix = name.substr(KAFU_DEST_PREFIX.size());
         auto dotPos = suffix.find('.');
-        if (dotPos == std::string::npos) {
+        if (dotPos == std::string_view::npos) {
           Fatal() << "Invalid kafu dest name: " << suffix;
         }
-        auto ident = suffix.substr(0, dotPos);
-        auto dest = suffix.substr(dotPos + 1);
+        Name ident = suffix.substr(0, dotPos);
+        std::string dest(suffix.substr(dotPos + 1));
         kafuDests[ident] = dest;
-
-        CustomSection s;
-        s.name = dataSegment->name.toString();
-        s.data = dataSegment->data;
-        module->customSections.push_back(s);
-      } else if (dataSegment->name.startsWith(KAFU_OFFLOAD_PREFIX)) {
+      } else if (startsWith(name, KAFU_OFFLOAD_PREFIX)) {
         // Parse .kafu_offload.ident.dest format.
-        const auto& name = dataSegment->name;
-        auto suffix = name.toString().substr(KAFU_OFFLOAD_PREFIX.size());
+        auto suffix = name.substr(KAFU_OFFLOAD_PREFIX.size());
         auto dotPos = suffix.find('.');
-        if (dotPos == std::string::npos) {
+        if (dotPos == std::string_view::npos) {
           Fatal() << "Invalid kafu offload name: " << suffix;
         }
-        auto ident = suffix.substr(0, dotPos);
-        auto dest = suffix.substr(dotPos + 1);
+        Name ident = suffix.substr(0, dotPos);
+        std::string dest(suffix.substr(dotPos + 1));
 
-        if (kafuOffloads.find(ident) == kafuOffloads.end()) {
-          kafuOffloads[ident] = std::vector<std::string>();
-        }
         kafuOffloads[ident].push_back(dest);
+      }
+    }
 
-        CustomSection s;
-        s.name = dataSegment->name.toString();
-        s.data = dataSegment->data;
-        module->customSections.push_back(s);
+    // Build a mapping from internal function names to their exported names.
+    // Note that a single function may be exported under multiple names.
+    for (const auto& ex : module->exports) {
+      if (ex->kind != ExternalKind::Function) {
+        continue;
+      }
+      if (auto* internal = ex->getInternalName()) {
+        functionInternalToExportNames[*internal].push_back(ex->name);
       }
     }
   }
@@ -224,7 +225,28 @@ public:
     return kafuOffloads.find(ident) != kafuOffloads.end() ? kafuOffloads.at(ident) : std::vector<std::string>();
   }
 
+  std::optional<Name> getExportName(const Function* curr) const {
+    auto it = functionInternalToExportNames.find(curr->name);
+    if (it != functionInternalToExportNames.end()) {
+      return std::optional<Name>(it->second.front());
+    }
+    return std::nullopt;
+  }
+
   bool isKafuDestFunction(const Function* curr) const {
+    // Prefer the exported name, since Kafu metadata identifiers are intended
+    // to be stable across internal renaming (e.g. symbol stripping).
+    auto it = functionInternalToExportNames.find(curr->name);
+    if (it != functionInternalToExportNames.end()) {
+      for (auto exportName : it->second) {
+        if (kafuDests.find(exportName) != kafuDests.end()) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    // Fallback for modules that do not export the function.
     return kafuDests.find(curr->name) != kafuDests.end();
   }
 
@@ -235,6 +257,7 @@ public:
 private:
   std::map<Name, std::string> kafuDests;
   std::map<Name, std::vector<std::string>> kafuOffloads;
+  std::unordered_map<Name, std::vector<Name>> functionInternalToExportNames;
 };
 
 // Kafu destがついている関数f(...)に対して、import関数kafu_remote.f(i32 callerIdx, ...)を追加する
@@ -372,6 +395,8 @@ public:
     if (!shouldInstrument(curr)) {
       return;
     }
+
+    std::cerr << "[Snapify] Instrumentation at function: " << kafuMetadata.getExportName(curr).value_or(curr->name) << std::endl;
 
     Builder builder(*getModule());
     auto* entryCall =
