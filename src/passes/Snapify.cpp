@@ -42,7 +42,6 @@
 //
 // ## Todo
 // - C/R tables
-// - C/R tables
 //
 // ## 仕様
 // ### 線形メモリ
@@ -82,18 +81,9 @@
 // 2. snapify_start_restoreを呼び出す
 // 3. snapify_restore_globalsを呼び出す
 // 4. _startを呼び出す
-//
-// Kafu RPC generator
-// - kafu_destが付いている関数に対して、import関数kafu_remote.f(i32 callerIdx, ...)を追加する
-// - TODO: call f(args...) をすべて call kafu_remote.f(callerIdx, args...) に変換する
-// FIXME: funcIdxの計算が何が原因で1ずれるのかわからん, importのせいだと思ったが上を追加しても1のままなので違うっぽい
 
-#include "asmjs/shared-constants.h"
-#include "ir/iteration.h"
-#include "ir/memory-utils.h"
-#include "ir/module-utils.h"
+#include "ir/literal-utils.h"
 #include "ir/names.h"
-#include "ir/utils.h"
 #include "wasm.h"
 #include <cassert>
 #include <memory>
@@ -259,50 +249,6 @@ private:
   std::map<Name, std::vector<std::string>> kafuOffloads;
   std::unordered_map<Name, std::vector<Name>> functionInternalToExportNames;
 };
-
-// Kafu destがついている関数f(...)に対して、import関数kafu_remote.f(i32 callerIdx, ...)を追加する
-/*
-class KafuRpcGenerator  : public WalkerPass<PostWalker<KafuRpcGenerator>>{
-public:
-  KafuRpcGenerator(MigrationPolicy migrationPolicy, Module* module, KafuMetadata kafuMetadata) : migrationPolicy(migrationPolicy), kafuMetadata(kafuMetadata)
-  {}
-
-  void visitFunction(Function* curr) {
-    if (migrationPolicy != MigrationPolicy::KAFU) {
-      return;
-    }
-    if (curr->imported()) {
-      return;
-    }
-    if (isSynthesizedFunction(curr->name)) {
-      return;
-    }
-    if (!kafuMetadata.isKafuDestFunction(curr)) {
-      return;
-    }
-
-    Builder builder(*getModule());
-    Tuple newParams = {Type::i32};
-    for (auto param : curr->getParams()) {
-      newParams.push_back(param);
-    }
-    // TODO: export nameを使うべき? シンボル削除すると壊れる
-    auto internalName = std::string("kafu_remote_") + curr->name.toString();
-    auto import = builder.makeFunction(internalName, Signature(newParams, Type::none), {});
-    import->module = "kafu_remote";
-    import->base = curr->name;
-    rpcFunctions.push_back(std::move(import));
-  }
-
-  std::vector<std::unique_ptr<Function>> getRpcFunctions() {
-    return std::move(rpcFunctions);
-  }
-private:
-  const MigrationPolicy migrationPolicy;
-  KafuMetadata kafuMetadata;
-  std::vector<std::unique_ptr<Function>> rpcFunctions;
-};
-*/
 
 struct MigrationPointInserter
   : public WalkerPass<PostWalker<MigrationPointInserter>> {
@@ -486,12 +432,6 @@ public:
     addGlobals(module);
 
     KafuMetadata kafuMetadata(module);
-    //auto generator = KafuRpcGenerator(migrationPolicy, module, kafuMetadata);
-    //generator.walkModule(module);
-    //auto kafuRpcFunctions = generator.getRpcFunctions();
-    //for (auto& func : kafuRpcFunctions) {
-    //  module->addFunction(std::move(func));
-    //}
     MigrationPointInserter(migrationPolicy, kafuMetadata).walkModule(module);
 
     renameStartFunction(module);
