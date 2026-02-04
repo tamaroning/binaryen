@@ -369,9 +369,13 @@ public:
     // Preserve the function result while still running exitCall.
     if (results.isConcrete()) {
       Index tmp = getOrCreateReturnValueTemp(curr, results);
-      auto* tee = builder.makeLocalTee(tmp, bodyWithEntry, results);
+      // `local.tee` returns a value, and placing it in a non-final position in
+      // a block violates wasm validation ("non-final block elements returning a
+      // value must be dropped"). Use `local.set` (type none) + `local.get`
+      // instead.
+      auto* set = builder.makeLocalSet(tmp, bodyWithEntry);
       auto* get = builder.makeLocalGet(tmp, results);
-      curr->body = builder.makeBlock({tee, exitCall, get}, results);
+      curr->body = builder.makeBlock({set, exitCall, get}, results);
       return;
     }
 
