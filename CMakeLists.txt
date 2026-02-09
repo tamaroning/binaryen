@@ -10,6 +10,9 @@ set(CMAKE_OSX_DEPLOYMENT_TARGET "10.14" CACHE STRING "Minimum OS X deployment ve
 project(binaryen LANGUAGES C CXX VERSION 125)
 include(GNUInstallDirs)
 
+# Snapify-specific version (for display and packaging)
+set(SNAPIFY_VERSION "0.1.4" CACHE STRING "Snapify version")
+
 # The C++ standard whose features are required to build Binaryen.
 # Keep in sync with scripts/test/shared.py cxx_standard
 # The if condition allows embedding in a project with a higher default C++ standard set
@@ -95,21 +98,25 @@ option(EMSCRIPTEN_ENABLE_SINGLE_FILE "Enable SINGLE_FILE mode in emscripten buil
 option(ENABLE_WERROR "Enable -Werror" ON)
 
 # For git users, attempt to generate a more useful version string
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/.git)
+# Format: "snapify-${SNAPIFY_VERSION} (based on wasm-opt <base>, rev <sha>)"
+set(BINARYEN_BASE_VERSION "${PROJECT_VERSION}")
+set(BINARYEN_VERSION_REV "xxx")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
   find_package(Git QUIET REQUIRED)
   execute_process(COMMAND
-               "${GIT_EXECUTABLE}" --git-dir=${CMAKE_CURRENT_SOURCE_DIR}/.git describe --tags --match version_*
+               "${GIT_EXECUTABLE}" -C "${CMAKE_CURRENT_SOURCE_DIR}" rev-parse --short=7 HEAD
            RESULT_VARIABLE
                GIT_VERSION_RESULT
            OUTPUT_VARIABLE
-               GIT_VERSION
+               BINARYEN_GIT_REV
            OUTPUT_STRIP_TRAILING_WHITESPACE)
   if(${GIT_VERSION_RESULT})
-    message(WARNING "Error running git describe to determine version")
+    message(WARNING "Error running git rev-parse to determine revision")
   else()
-    set(PROJECT_VERSION "${PROJECT_VERSION} (${GIT_VERSION})")
+    set(BINARYEN_VERSION_REV "${BINARYEN_GIT_REV}")
   endif()
 endif()
+set(PROJECT_VERSION "snapify-${SNAPIFY_VERSION} (based on wasm-opt ${BINARYEN_BASE_VERSION}, rev ${BINARYEN_VERSION_REV})")
 
 configure_file(config.h.in config.h)
 
