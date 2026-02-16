@@ -5,10 +5,10 @@
 //
 // A typical pipeline is:
 //
-//   $(WASM_OPT) $wasm -O1 --enable-multimemory --snapify \
+//   $(WASM_OPT) $wasm -O1 --enable-multimemory --snapify
 //     --pass-arg=policy@always -o $output
-//   $(WASM_OPT) $output -O1 --asyncify \
-//     --pass-arg=asyncify-memory@snapify_memory \
+//   $(WASM_OPT) $output -O1 --asyncify
+//     --pass-arg=asyncify-memory@snapify_memory
 //     --enable-multimemory -o $output
 //
 // ## Usage
