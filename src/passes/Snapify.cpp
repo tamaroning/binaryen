@@ -398,8 +398,6 @@ public:
       return;
     }
 
-    std::cerr << "[Snapify] Instrumentation at function: " << kafuMetadata.getExportName(curr).value_or(curr->name) << std::endl;
-
     Builder builder(*getModule());
     auto* entryCall =
       builder.makeCall(SNAPIFY_MIGRATION_POINT,
