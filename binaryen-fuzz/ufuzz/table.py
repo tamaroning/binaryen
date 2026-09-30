@@ -25,8 +25,8 @@ Adding a feature (floats, bulk memory, tables, exceptions, SIMD):
 from wmod import N, NUM, is_ref
 
 FEATURES_ON = {"int", "mem", "mem64", "multimem", "memgrow", "global", "ctl", "loop", "call",
-               "gc", "cast", "i31", "select", "trap", "bulk"}
-VALTYPES_ON = ["i32", "i64"]
+               "gc", "cast", "i31", "select", "trap", "bulk", "float", "table", "data", "exn"}
+VALTYPES_ON = ["i32", "i64", "f32", "f64"]
 
 B32 = [0, 1, 2, -1, -2, 3, 4, 7, 8, 15, 16, 31, 32, 63, 64, 0x7f, 0x80, 0xff, 0x100, 0x7fff, 0x8000,
        0xffff, 0x10000, 0x7fffffff, -0x80000000, -0x7fffffff, 0xfffc, 0xfffd, 0xfffe, 0x3fffffff,
@@ -78,10 +78,16 @@ ROWS.append(num_row("i32.wrap_i64", 1.5))
 ROWS.append(num_row("i64.extend_i32_s", 1))
 ROWS.append(num_row("i64.extend_i32_u", 1))
 
+# ---- floating point (one row per opcode from the shared signature table)
+for _op, (_ps, _r) in sorted(NUM.items()):
+    if _op[0] == "f" or any(x[0] == "f" for x in _ps):
+        _w = .5 if "reinterpret" in _op or "trunc_" in _op or "convert" in _op else 1
+        ROWS.append(num_row(_op, _w, "float"))
+
 
 @row("const", "int", 3, "any")
 def _const(g, want, d):
-    if want not in ("i32", "i64"):
+    if want not in ("i32", "i64", "f32", "f64"):
         return None
     return g.const(want)
 
@@ -140,7 +146,7 @@ def _memop(g, d, table, want, store):
     if k is None:
         return None
     name, at = g.m.memories[k][0], g.m.memories[k][1]
-    ops = [o for o, (t, w) in table.items() if (want is None or t == want) and o[0] == "i"]
+    ops = [o for o, (t, w) in table.items() if (want is None or t == want) and (o[0] == "i" or "float" in g.features_on)]
     if not ops:
         return None
     op = g.r.choice(ops)
@@ -436,6 +442,17 @@ def _aset(g, want, d):
     return N("array.set", [T], [g.ref_operand(T, d + 1), g.index(d + 1), g.expr(g.stv(s), d + 1)])
 
 
+@row("array.copy", "gc", .7, "void")
+def _acopy(g, want, d):
+    arrs = [(T, td.fields[0]) for T, td in g.tmap.items() if td.kind == "array"]
+    pairs = [(D, S) for D, (ds, dm) in arrs if dm for S, (ss, _) in arrs if ss == ds]
+    if not pairs:
+        return None
+    D, S = g.r.choice(pairs)
+    n = g.const("i32", g.r.choice([0, 1, 1, 2, 3])) if g.r.random() < .7 else g.expr("i32", d + 1)
+    return N("array.copy", [D, S], [g.ref_operand(D, d + 1), g.index(d + 1), g.ref_operand(S, d + 1), g.index(d + 1), n])
+
+
 @row("array.len", "gc", .6, "i32")
 def _alen(g, want, d):
     return N("array.len", [], [g.expr(("ref", True, "array"), d + 1)])
@@ -543,3 +560,135 @@ def _bronnn(g, want, d):
     rest = g.expr(want, d + 1)
     g.labels.pop()
     return N("block", [lab, ["result", _vts(want)]], [N("br_on_non_null", [lab], [e]), rest])
+
+
+# ---- tables, passive segments, exceptions (module parts come from base_module)
+def _tidx(g, d, n=8):
+    if g.r.random() < .75:
+        return N("i32.const", [str(g.r.choice(range(n + 2)))])
+    return g.expr("i32", d + 1)
+
+
+def _funcref(g, d):
+    x = g.r.random()
+    if x < .55:
+        return N("ref.func", [g.r.choice(g.m.helpers)])
+    if x < .75:
+        return N("ref.null", ["nofunc"])
+    return N("table.get", [g.pick_table()], [_tidx(g, d + 1)])
+
+
+@row("table.size", "table", .3, "i32")
+def _tsize(g, want, d):
+    return N("table.size", [g.pick_table()])
+
+
+@row("table.get", "table", .4, "ref")
+def _tget(g, want, d):
+    if want != ("ref", True, "func"):
+        return None
+    return N("table.get", [g.pick_table()], [_tidx(g, d)])
+
+
+@row("ref.func", "table", .4, "ref")
+def _rfunc(g, want, d):
+    if want[2] not in ("func",):
+        return None
+    return N("ref.func", [g.r.choice(g.m.helpers)])
+
+
+@row("table.set", "table", .6, "void")
+def _tset(g, want, d):
+    return N("table.set", [g.pick_table()], [_tidx(g, d), _funcref(g, d)])
+
+
+@row("table.grow", "table", .25, "i32")
+def _tgrow(g, want, d):
+    return N("table.grow", [g.pick_table()], [_funcref(g, d), N("i32.const", [str(g.r.choice([0, 1, 2]))])])
+
+
+@row("table.fill", "table", .3, "void")
+def _tfill(g, want, d):
+    return N("table.fill", [g.pick_table()], [_tidx(g, d), _funcref(g, d), _len(g, "i32", d)])
+
+
+@row("table.copy", "table", .3, "void")
+def _tcopy(g, want, d):
+    return N("table.copy", [g.pick_table(), g.pick_table()], [_tidx(g, d), _tidx(g, d), _len(g, "i32", d)])
+
+
+@row("table.init", "table", .35, "void")
+def _tinit(g, want, d):
+    e = g.r.choice(g.m.elem_names)
+    return N("table.init", [g.pick_table(), e], [_tidx(g, d), _tidx(g, d, 3), _len(g, "i32", d)])
+
+
+@row("elem.drop", "table", .15, "void")
+def _edrop(g, want, d):
+    return N("elem.drop", [g.r.choice(g.m.elem_names)])
+
+
+@row("call_indirect", "table", .6, "any")
+def _callind(g, want, d):
+    if want not in ("i32", None):
+        return None
+    n = N("call_indirect", [g.pick_table(), ["type", "$ft0"]], [g.expr("i32", d + 1), _tidx(g, d)])
+    return n if want is not None else N("drop", [], [n])
+
+
+@row("memory.init", "data", .4, "void")
+def _minit(g, want, d):
+    k = g.pick_mem()
+    if k is None:
+        return None
+    name, at = g.m.memories[k][0], g.m.memories[k][1]
+    return N("memory.init", [name, g.r.choice(g.m.data_names)],
+             [g.addr(at, d), _tidx(g, d, 4), _len(g, "i32", d)])
+
+
+@row("data.drop", "data", .15, "void")
+def _ddrop(g, want, d):
+    return N("data.drop", [g.r.choice(g.m.data_names)])
+
+
+@row("throw", "exn", .5, "void")
+def _throw(g, want, d):
+    tag, ps = g.r.choice(g.m.tags)
+    n = N("throw", [tag], [g.expr(p, d + 1) for p in ps])
+    return N("if", [], [g.cond(d + 1), N("then", [], [n])])
+
+
+def _try_body(g, d):
+    body = g.body(None, d + 1)
+    if g.r.random() < .6:
+        body.append(_throw(g, None, d + 1))
+    return body
+
+
+@row("try_table(catch)", "exn", .6, "i32")
+def _try_catch(g, want, d):
+    if want != "i32" or d > 3:
+        return None
+    lab = g.newlab()
+    tag = g.m.tags[0][0]
+    inner = N("try_table", [["catch", tag, lab]], _try_body(g, d))
+    return N("block", [lab, ["result", "i32"]], [inner, g.expr("i32", d + 1)])
+
+
+@row("try_table(catch_all)", "exn", .6, "void")
+def _try_all(g, want, d):
+    if d > 3:
+        return None
+    lab = g.newlab()
+    inner = N("try_table", [["catch_all", lab]], _try_body(g, d))
+    return N("block", [lab], [inner])
+
+
+@row("try_table(catch_all_ref)", "exn", .4, "void")
+def _try_ref(g, want, d):
+    if d > 3:
+        return None
+    lab, done = g.newlab(), g.newlab()
+    inner = N("try_table", [["catch_all_ref", lab]], _try_body(g, d))
+    caught = N("block", [lab, ["result", "exnref"]], [inner, N("br", [done])])
+    return N("block", [done], [N("throw_ref", [], [caught])])

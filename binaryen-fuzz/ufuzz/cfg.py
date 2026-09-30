@@ -29,7 +29,7 @@ DEFAULTS = {
 }
 FEATURES = ["--enable-gc", "--enable-reference-types", "--enable-multimemory", "--enable-memory64",
             "--enable-bulk-memory", "--enable-sign-ext", "--enable-mutable-globals",
-            "--enable-nontrapping-float-to-int"]
+            "--enable-nontrapping-float-to-int", "--enable-exception-handling"]
 
 # everything V8 runs deterministically (no relaxed SIMD, threads, strings,
 # stack switching, custom descriptors); used for "raw" modules that only

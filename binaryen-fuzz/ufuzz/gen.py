@@ -156,13 +156,27 @@ class Gen:
         self.fvars[n] = "i32"
         return n
 
+    def pick_table(self):
+        return self.r.choice(self.m.tables)[0]
+
     def pick_mem(self):
         if not self.m.memories:
             return None
         return self.r.randrange(len(self.m.memories))
 
     # ------------------------------------------------ leaves
+    FLOATS = ["0", "-0", "1", "-1", "0.5", "1.5", "2", "-2.5", "3", "inf", "-inf", "nan", "-nan", "nan:0x200001",
+              "nan:0x1", "0x1p-149", "0x1p-1074", "0x1.fffffep+127", "1e10", "4294967296", "2147483648", "-2147483649",
+              "9223372036854775808", "0.1"]
+
     def const(self, t, v=None):
+        if t in ("f32", "f64"):
+            x = self.r.random()
+            if x < .8 or v is not None:
+                txt = self.FLOATS[self.r.randrange(len(self.FLOATS))] if v is None else str(v)
+            else:
+                txt = "%r" % (self.r.uniform(-1e3, 1e3),)
+            return N(t + ".const", [txt])
         if v is None:
             if self.r.random() < .85:
                 v = self.r.choice(B32 if t == "i32" else B64)
@@ -265,6 +279,8 @@ class Gen:
             del tt
         if want == "i64":
             return N("i64.extend_i32_u", [], [e])
+        if want in ("f32", "f64"):
+            return N(want + ".convert_i32_s", [], [e])
         return e
 
     # ------------------------------------------------ expressions
@@ -275,9 +291,13 @@ class Gen:
             kind_ok = ("ref", "any", "anyv")
         elif want == "i32":
             kind_ok = ("i32", "int", "any", "anyv")
+        elif want in ("f32", "f64"):
+            # "int" rows make integers; only the loads take the wanted type
+            kind_ok = ("any", "anyv")
         else:
             kind_ok = ("int", "any", "anyv")
-        cands = [rw for rw in self.rows if rw.out in kind_ok or rw.out == want]
+        cands = [rw for rw in self.rows if rw.out in kind_ok or rw.out == want or
+                 (want in ("f32", "f64") and rw.name == "load")]
         ws = [rw.weight * self.weights.get(rw.name, 1.0) for rw in cands]
         return cands, ws
 
@@ -316,15 +336,17 @@ class Gen:
         r = self.r
         params = []
         for i in range(r.randint(1, 3)):
-            params.append(("$p%d" % i, r.choice(["i32", "i32", "i64"])))
+            params.append(("$p%d" % i, r.choice(["i32", "i32", "i64"] + (["f32", "f64"] if "float" in self.features_on else []))))
         nref = r.choice([0, 1, 1, 2, 2]) if "gc" in self.features_on else 0
         for i in range(nref):
             params.append(("$r%d" % i, self.any_ref()))
         locals_ = [("$l0", "i32"), ("$l1", "i32"), ("$l2", "i64")]
+        if "float" in self.features_on:
+            locals_ += [("$l3", "f32"), ("$l4", "f64")]
         if "gc" in self.features_on:
             for i in range(r.randint(1, 3)):
                 locals_.append(("$q%d" % i, self.any_ref()))
-        res = r.choice(["i32", "i32", "i64", None, "ref"])
+        res = r.choice(["i32", "i32", "i64", None, "ref"] + (["f32", "f64"] if "float" in self.features_on else []))
         if res == "ref":
             res = self.any_ref() if "gc" in self.features_on else "i32"
         self.f = Func("$f%d" % idx, params, [res] if res else [], locals_, [], "f%d" % idx)
@@ -356,7 +378,25 @@ def base_module(r, gc=True):
     if r.random() < .4:
         m.globals.append(("$g3", "i32", True, "(i32.const 5)", None))
     m.imports = list(IMPORTS)
+    add_table_parts(r, m)
     return m
+
+
+def add_table_parts(r, m):
+    """function types, helper functions, tables, segments and tags for the
+    table / data / exception rows"""
+    m.ftypes = [("$ft0", ["i32"], ["i32"]), ("$ft1", ["i64"], ["i64"])]
+    m.helpers = ["$th0", "$th1", "$th2"]
+    k = r.choice([1, 3, 7, -1])
+    m.funcs.append(Func("$th0", [("$p0", "i32")], ["i32"], [], [N("i32.add", [], [N("local.get", ["$p0"]), N("i32.const", [str(k)])])], "th0"))
+    m.funcs.append(Func("$th1", [("$p0", "i32")], ["i32"], [], [N("i32.mul", [], [N("local.get", ["$p0"]), N("local.get", ["$p0"])])], "th1"))
+    m.funcs.append(Func("$th2", [("$p0", "i64")], ["i64"], [], [N("i64.xor", [], [N("local.get", ["$p0"]), N("i64.const", ["255"])])], "th2"))
+    m.tables = [("$t0", 8), ("$t1", 4)]
+    m.tags = [("$e0", ["i32"]), ("$e1", [])]
+    m.elems = ["(elem (table $t0) (i32.const 0) func $th0 $th1 $th2 $th0)", "(elem $e1 func $th1 $th0 $th0)"]
+    m.elem_names = ["$e1"]
+    m.datas = ['(data $d0 "\\01\\02\\03\\04\\05\\06\\07\\08")', '(data $d1 "wasm")']
+    m.data_names = ["$d0", "$d1"]
 
 
 def gen_module(seed, weights=None, nfuncs=None):

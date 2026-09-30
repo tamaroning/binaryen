@@ -211,7 +211,7 @@ class N:
         return copy.deepcopy(self)
 
 
-IMM_HEADS = {"result", "ref", "type", "param", "mut", "exact"}
+IMM_HEADS = {"result", "ref", "type", "param", "mut", "exact", "catch", "catch_all", "catch_ref", "catch_all_ref"}
 CTRL = {"block", "loop", "if"}
 
 
@@ -293,6 +293,11 @@ class Module:
         self.globals = []  # [(name, vt, mut, init_text, export)]
         self.funcs = []
         self.meta = {}
+        self.ftypes = []  # [(name, params, results)] function types
+        self.tables = []  # [(name, size)] funcref tables
+        self.tags = []  # [(name, [param types])]
+        self.elems = []  # [text] element segments
+        self.datas = []  # [text] data segments
 
     def tmap(self):
         return {t.name: t for t in self.types}
@@ -301,6 +306,9 @@ class Module:
         out = ["(module"]
         for t in self.types:
             out.append("  " + t.text())
+        for n, ps, rs in self.ftypes:
+            out.append("  (type %s (func%s%s))" % (n, "".join(" (param %s)" % vt_str(p) for p in ps),
+                                                   "".join(" (result %s)" % vt_str(r) for r in rs)))
         for fn, mod, fld, ps, rs in self.imports:
             out.append('  (import "%s" "%s" (func %s%s%s))' % (
                 mod, fld, fn, "".join(" (param %s)" % vt_str(p) for p in ps),
@@ -308,12 +316,18 @@ class Module:
         for k, (n, at, mn, mx) in enumerate(self.memories):
             out.append('  (memory %s (export "m%d") %s%d%s)' % (n, k, "i64 " if at == "i64" else "", mn,
                                                                "" if mx is None else " %d" % mx))
+        for n, size in self.tables:
+            out.append("  (table %s %d funcref)" % (n, size))
+        for n, ps in self.tags:
+            out.append("  (tag %s%s)" % (n, "".join(" (param %s)" % vt_str(p) for p in ps)))
         for n, t, mut, init, exp in self.globals:
             ty = "(mut %s)" % vt_str(t) if mut else vt_str(t)
             # immutable globals are never exported: exwasm reads an exported
             # immutable global as a symbolic value (limits/const_export_global.wat)
             exp = exp if mut else None
             out.append("  (global %s%s %s %s)" % (n, ' (export "%s")' % exp if exp else "", ty, init))
+        out.extend("  " + d for d in self.datas)
+        out.extend("  " + e for e in self.elems)
         for f in self.funcs:
             out.append(f.text())
         out.append(")")
@@ -689,6 +703,8 @@ class TypeCtx:
         self.imports = {i[0]: (i[3], i[4]) for i in m.imports}
         self.fsigs = {f.name: ([t for _, t in f.params], f.results) for f in m.funcs}
         self.globals = {g[0]: g for g in m.globals}
+        self.ftypes = {n: (ps, rs) for n, ps, rs in getattr(m, "ftypes", [])}
+        self.tags = dict(getattr(m, "tags", []))
         self.mems = {mm[0]: mm for mm in m.memories}
         self.memlist = [mm[0] for mm in m.memories]
 
@@ -1011,6 +1027,45 @@ class Typer:
             self.kids(n)
             self.ctype(n.imms[0], "array")
             return None
+        if op == "ref.func":
+            return ("ref", False, "func")
+        if op == "table.get":
+            self.kids(n)
+            return ("ref", True, "func")
+        if op in ("table.set", "table.fill", "table.copy", "table.init", "elem.drop", "memory.init", "data.drop"):
+            self.kids(n)
+            return None
+        if op == "table.size":
+            return "i32"
+        if op == "table.grow":
+            self.kids(n)
+            return "i32"
+        if op == "call_indirect":
+            self.kids(n)
+            ft = next((i[1] for i in n.imms if isinstance(i, list) and i[0] == "type"), None)
+            if ft not in c.ftypes:
+                raise Unsupported("call_indirect type")
+            rs = c.ftypes[ft][1]
+            return rs[0] if rs else None
+        if op == "throw":
+            self.kids(n)
+            return "unr"
+        if op == "throw_ref":
+            self.kids(n)
+            return "unr"
+        if op == "try_table":
+            for i in n.imms:
+                if isinstance(i, list) and i[0].startswith("catch"):
+                    self.lab(i[-1])
+            self.labels.append((None, []))
+            self.seq(n.kids)
+            self.labels.pop()
+            return None
+        if op == "array.copy":
+            self.kids(n)
+            self.ctype(n.imms[0], "array")
+            self.ctype(n.imms[1], "array")
+            return None
         if op == "array.len":
             self.kids(n)
             return "i32"
@@ -1059,6 +1114,10 @@ def free_labels(n, bound=None):
         for i in n.imms:
             if i not in bound:
                 out.add(i)
+    if n.op == "try_table":
+        for i in n.imms:
+            if isinstance(i, list) and i and i[0].startswith("catch") and i[-1] not in bound:
+                out.add(i[-1])
     if n.op == "return":
         out.add("return")
     return out
