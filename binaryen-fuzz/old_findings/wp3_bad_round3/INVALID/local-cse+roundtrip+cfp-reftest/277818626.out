@@ -1,0 +1,144 @@
+[fuzz-exec] export global$
+[LoggingExternalInterface logging 33554432]
+[fuzz-exec] export global$_2
+[LoggingExternalInterface logging function]
+[fuzz-exec] export global$_5
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export global$_7
+[LoggingExternalInterface logging -262144]
+[fuzz-exec] export global$_8
+[LoggingExternalInterface logging -34359738368]
+[fuzz-exec] export global$_13
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export global$_15
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export global$_18
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export global$_19
+[LoggingExternalInterface logging function]
+[fuzz-exec] export ref_func_target_invoker
+[trap unreachable]
+[fuzz-exec] export ref_func_target_1_invoker
+[trap unreachable]
+[fuzz-exec] export func
+[fuzz-exec] note result: func => i32x4 0x00000000 0x00000000 0x00000000 0x00000000
+[fuzz-exec] export func_18
+[fuzz-exec] note result: func_18 => 4294967295
+[fuzz-exec] export func_18_invoker
+[fuzz-exec] export func_20_invoker
+[fuzz-exec] export func_22
+[fuzz-exec] note result: func_22 => object(null)
+[fuzz-exec] export func_22_invoker
+[fuzz-exec] export func_24_invoker
+[fuzz-exec] export func_26
+[exception thrown: imported-wasm-tag -27391]
+[fuzz-exec] export func_26_invoker
+[exception thrown: imported-wasm-tag -27391]
+[fuzz-exec] export func_28
+[fuzz-exec] note result: func_28 => i32x4 0x00000000 0x00000000 0x00000000 0x00000000
+[fuzz-exec] export func_28_invoker
+[fuzz-exec] export func_31
+[fuzz-exec] note result: func_31 => object(null)
+[fuzz-exec] export func_31_invoker
+[fuzz-exec] export func_33
+[fuzz-exec] note result: func_33 => -49
+35184372088832
+[fuzz-exec] export func_33_invoker
+[fuzz-exec] export func_35
+[exception thrown: imported-wasm-tag 245]
+[fuzz-exec] export func_36
+[fuzz-exec] note result: func_36 => 131072
+[fuzz-exec] export func_36_invoker
+[fuzz-exec] export func_41_invoker
+[fuzz-exec] export func_44_invoker
+[fuzz-exec] export func_46
+[LoggingExternalInterface logging externref(105)]
+[LoggingExternalInterface logging 111]
+[LoggingExternalInterface logging externref(105)]
+[LoggingExternalInterface logging 65536]
+[fuzz-exec] note result: func_46 => -44
+[fuzz-exec] export func_46_invoker
+[LoggingExternalInterface logging externref(105)]
+[LoggingExternalInterface logging 111]
+[LoggingExternalInterface logging externref(105)]
+[LoggingExternalInterface logging 65536]
+[LoggingExternalInterface logging externref(105)]
+[LoggingExternalInterface logging 111]
+[LoggingExternalInterface logging externref(105)]
+[LoggingExternalInterface logging 65536]
+[LoggingExternalInterface logging externref(105)]
+[LoggingExternalInterface logging 111]
+[LoggingExternalInterface logging externref(105)]
+[LoggingExternalInterface logging 65536]
+[fuzz-exec] export func_50_invoker
+[fuzz-exec] export func_52
+[trap cast error]
+[fuzz-exec] export func_53_invoker
+[fuzz-exec] export func_55_invoker
+[LoggingExternalInterface logging function]
+[fuzz-exec] export func_57
+[LoggingExternalInterface logging null]
+[exception thrown: imported-js-tag jserror]
+[fuzz-exec] export func_61
+[fuzz-exec] note result: func_61 => i31ref(-40)
+[fuzz-exec] export func_62
+[fuzz-exec] note result: func_62 => object(null)
+[fuzz-exec] export func_62_invoker
+[fuzz-exec] export func_64_invoker
+[trap null ref]
+[fuzz-exec] export func_66
+[trap null ref]
+[fuzz-exec] export func_66_invoker
+[trap null ref]
+[fuzz-exec] export func_68
+[trap i32.rem_s by 0]
+[fuzz-exec] export func_68_invoker
+[trap i32.rem_s by 0]
+[fuzz-exec] export func_70_invoker
+[fuzz-exec] export func_72
+[trap unreachable]
+[wasm-validator error in function 39] unexpected false: , on 
+(try $label (result (ref $4))
+ (do
+  (try (result (ref (exact $4)))
+   (do
+    (struct.new_default $4)
+   )
+   (delegate $label)
+  )
+ )
+ (catch $tag$1
+  (local.set $1
+   (local.tee $0
+    (struct.new_default $4)
+   )
+  )
+  (if
+   (global.get $__rt)
+   (then
+    (rethrow $label)
+   )
+  )
+  (local.get $1)
+ )
+ (catch $tag$0
+  (drop
+   (block (result i32)
+    (drop
+     (ref.as_non_null
+      (pop (ref null $3))
+     )
+    )
+    (i32.const 0)
+   )
+  )
+  (if
+   (global.get $__rt)
+   (then
+    (rethrow $label)
+   )
+  )
+  (local.get $0)
+ )
+)
+catch's body (tag$0)'s pop's location is not validFatal: error after opts

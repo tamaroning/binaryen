@@ -1,0 +1,128 @@
+[fuzz-exec] export global$_3
+[LoggingExternalInterface logging 0]
+[fuzz-exec] export global$_4
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export func_13_invoker
+[LoggingExternalInterface logging i32x4 0x69510487 0xc72fb5fe 0x1ec86ffd 0x64958a7d]
+[fuzz-exec] export func_15
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging null]
+[trap unreachable]
+[fuzz-exec] export func_17
+[trap null ref]
+[wasm-validator error in function 2] unexpected false: , on 
+(try (result nullexternref)
+ (do
+  (ref.null noextern)
+ )
+ (catch $tag$0
+  (drop
+   (block (result nullexternref)
+    (drop
+     (ref.as_non_null
+      (pop (ref $1))
+     )
+    )
+    (ref.null noextern)
+   )
+  )
+  (ref.null noextern)
+ )
+)
+catch's body (tag$0)'s pop's location is not validFatal: error after opts

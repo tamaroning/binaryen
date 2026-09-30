@@ -1,0 +1,26 @@
+[fuzz-exec] export global$_1
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export global$_2
+[LoggingExternalInterface logging 4294946816]
+[fuzz-exec] export global$_5
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export global$_7
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export global$_9
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export global$_12
+[LoggingExternalInterface logging 4503599627370497]
+[fuzz-exec] export global$_13
+[LoggingExternalInterface logging i32x4 0x00000001 0x00000000 0x000000fe 0x00000000]
+[fuzz-exec] export func_invoker
+[trap null ref]
+[fuzz-exec] export func_12
+[trap null ref]
+[fuzz-exec] export func_12_invoker
+[trap null ref]
+[fuzz-exec] export func_14_invoker
+[trap null ref]
+[fuzz-exec] export func_17_invoker
+[fuzz-exec] export func_19_invoker
+[exception thrown: imported-wasm-tag -134217728]
+wasm-opt: /home/tamaron/work/binaryen/src/ir/eh-utils.cpp:122: void wasm::EHUtils::handleBlockNestedPop(wasm::Try*, wasm::Function*, wasm::Module&): Assertion `pop && "Pop has not been found in this catch"' failed.

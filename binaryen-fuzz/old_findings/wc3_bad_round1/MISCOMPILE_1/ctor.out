@@ -1,0 +1,8 @@
+trying to eval func
+  ...stopping in block due to break
+  ...success on func.
+trying to eval func_invoker
+  ...success on func_invoker.
+trying to eval func_11
+  ...partial evalling successful, but stopping since could not eval: exception thrown: tag$0
+  ...stopping

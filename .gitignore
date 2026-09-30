@@ -63,3 +63,6 @@ CMakeUserPresets.json
 .cache/*
 
 .venv/
+
+# Local link to build/bin
+/bin

@@ -1,0 +1,2 @@
+/home/tamaron/work/binaryen/bin/wasm-opt wp6/mut.wat --all-features --disable-fp16 --disable-shared-everything --disable-stack-switching --fuzz-exec --type-unfinalizing --reorder-functions-by-name --inlining-optimizing -o /dev/null
+/home/tamaron/work/binaryen/bin/wasm-opt -ttf wp6/in.bin --all-features --disable-fp16 --disable-shared-everything --disable-stack-switching -o wp6/gen.wasm --no-fuzz-oob

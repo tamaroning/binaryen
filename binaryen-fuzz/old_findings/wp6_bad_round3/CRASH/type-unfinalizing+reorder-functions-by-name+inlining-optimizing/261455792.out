@@ -1,0 +1,244 @@
+[fuzz-exec] export global$
+[LoggingExternalInterface logging -128]
+[fuzz-exec] export global$_2
+[LoggingExternalInterface logging 9223372036854775808]
+[fuzz-exec] export global$_7
+[LoggingExternalInterface logging i31ref(-110)]
+[fuzz-exec] export global$_8
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export global$_11
+[LoggingExternalInterface logging -128]
+[fuzz-exec] export global$_14
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export global$_20
+[LoggingExternalInterface logging -131073]
+[fuzz-exec] export global$_24
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export global$_25
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export global$_27
+[LoggingExternalInterface logging i31ref(86)]
+[fuzz-exec] export func
+[LoggingExternalInterface logging -131073 -1]
+[fuzz-exec] note result: func => object(null)
+[fuzz-exec] export func_10_invoker
+[fuzz-exec] export func_12
+[fuzz-exec] note result: func_12 => 108
+[fuzz-exec] export func_13
+[fuzz-exec] note result: func_13 => object(null)
+[fuzz-exec] export func_15
+[LoggingExternalInterface logging 17]
+[fuzz-exec] note result: func_15 => -255
+[fuzz-exec] export func_15_invoker
+[LoggingExternalInterface logging 17]
+[fuzz-exec] export func_17_invoker
+[fuzz-exec] export func_20_invoker
+[fuzz-exec] export func_22_invoker
+[LoggingExternalInterface logging object(null)]
+[LoggingExternalInterface logging object(null)]
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export func_24_invoker
+[LoggingExternalInterface logging object(null)]
+[LoggingExternalInterface logging object(null)]
+[trap unaligned atomic operation]
+[fuzz-exec] export func_26_invoker
+[trap null ref]
+[fuzz-exec] export func_28
+[fuzz-exec] note result: func_28 => 0
+[fuzz-exec] export func_28_invoker
+[fuzz-exec] export func_33_invoker
+[fuzz-exec] export func_35_invoker
+[exception thrown: imported-js-tag jserror]
+[fuzz-exec] export func_37_invoker
+[trap unreachable]
+[fuzz-exec] export func_39
+[exception thrown: imported-js-tag jserror]
+[fuzz-exec] export func_41
+[fuzz-exec] note result: func_41 => -4611686018427387904
+[fuzz-exec] export func_43_invoker
+[fuzz-exec] export func_45
+[fuzz-exec] note result: func_45 => 0
+[fuzz-exec] export func_45_invoker
+[fuzz-exec] export func_47
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[LoggingExternalInterface logging 89]
+[trap unreachable]
+[fuzz-exec] export func_48
+[trap unreachable]
+[fuzz-exec] export func_49
+[exception thrown: imported-wasm-tag -2]
+[fuzz-exec] export func_50_invoker
+[fuzz-exec] export func_52
+[LoggingExternalInterface logging 17]
+[fuzz-exec] note result: func_52 => object(null)
+object(null)
+125309968
+[fuzz-exec] export func_52_invoker
+[LoggingExternalInterface logging 17]
+[LoggingExternalInterface logging 17]
+[LoggingExternalInterface logging 17]
+[LoggingExternalInterface logging 17]
+[fuzz-exec] export func_54
+[trap unreachable]
+[fuzz-exec] export func_54_invoker
+[trap unreachable]
+[fuzz-exec] export func_56_invoker
+[exception thrown: imported-js-tag jserror]
+[fuzz-exec] export func_58
+[fuzz-exec] note result: func_58 => 8796093022207
+[fuzz-exec] export func_58_invoker
+[fuzz-exec] export func_60
+[fuzz-exec] note result: func_60 => -2147483648
+2147483648
+[fuzz-exec] export func_61_invoker
+[fuzz-exec] export func_63_invoker
+[fuzz-exec] export func_65
+[LoggingExternalInterface logging function]
+[fuzz-exec] export func_67_invoker
+[exception thrown: imported-js-tag jserror]
+[fuzz-exec] export func_69_invoker
+[exception thrown: imported-wasm-tag -2]
+[fuzz-exec] export func_72
+[trap null ref]
+[fuzz-exec] export func_72_invoker
+[trap null ref]
+[fuzz-exec] export func_74
+[fuzz-exec] note result: func_74 => i32x4 0x000074fe 0x82fb00ff 0x855800a2 0x44473ea6
+object(null)
+null
+239
+[fuzz-exec] export func_75_invoker
+[trap unreachable]
+[fuzz-exec] export func_78_invoker
+[fuzz-exec] export func_80_invoker
+[fuzz-exec] export func_82
+[fuzz-exec] note result: func_82 => object(null)
+[fuzz-exec] export func_83_invoker
+[fuzz-exec] export func_85
+[LoggingExternalInterface logging i31ref(65467)]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[trap unreachable]
+[fuzz-exec] export func_85_invoker
+[LoggingExternalInterface logging i31ref(65467)]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterwasm-opt: /home/tamaron/work/binaryen/src/ir/eh-utils.cpp:122: void wasm::EHUtils::handleBlockNestedPop(wasm::Try*, wasm::Function*, wasm::Module&): Assertion `pop && "Pop has not been found in this catch"' failed.

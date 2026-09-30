@@ -1,0 +1,20 @@
+# Tracked: the campaign tools (scripts, notes, hand-written .wat) and the kept
+# findings (old_findings/, repro/). Not tracked: whatever a run writes.
+
+# Worker directories and run state
+/w[cpv]*/
+/bin/
+/coverage.json
+/feat/*/
+/gcfuzz/*/
+/interim/*/
+/ufuzz/*/
+/ufuzz/config.json
+/ufuzz/final_report.txt
+/ufuzz/final_stats.json
+/ufuzz/triage.jsonl
+/ufuzz/triage.err
+pids
+*.pid
+*.log
+__pycache__/

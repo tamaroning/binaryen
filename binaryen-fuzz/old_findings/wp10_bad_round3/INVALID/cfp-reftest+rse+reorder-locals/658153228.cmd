@@ -1,0 +1,2 @@
+/home/tamaron/work/binaryen/bin/wasm-opt wp10/mut.wat --all-features --disable-fp16 --disable-shared-everything --disable-stack-switching --fuzz-exec --cfp-reftest --rse --reorder-locals -o /dev/null --closed-world
+/home/tamaron/work/binaryen/bin/wasm-opt -ttf wp10/in.bin --all-features --disable-fp16 --disable-shared-everything --disable-stack-switching -o wp10/gen.wasm --closed-world

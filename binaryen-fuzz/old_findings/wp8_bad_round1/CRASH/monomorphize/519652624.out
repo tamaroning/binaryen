@@ -1,0 +1,32 @@
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export global$
+[LoggingExternalInterface logging function]
+[fuzz-exec] export global$_1
+[LoggingExternalInterface logging null]
+[fuzz-exec] export ref_func_target_invoker
+[trap unreachable]
+[fuzz-exec] export func
+[fuzz-exec] note result: func => object(null)
+[fuzz-exec] export func_12
+[fuzz-exec] note result: func_12 => object(null)
+[fuzz-exec] export func_13
+[LoggingExternalInterface logging -1 2147483647]
+[trap null ref]
+[fuzz-exec] export func_13_invoker
+[LoggingExternalInterface logging -1 2147483647]
+[trap null ref]
+[fuzz-exec] export func_16
+[LoggingExternalInterface logging 262145]
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] note result: func_16 => i32x4 0x02019b5c 0x00002671 0xffcfffa7 0x0030fff2
+[fuzz-exec] export func_16_invoker
+[LoggingExternalInterface logging 262145]
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export func_19_invoker
+[fuzz-exec] export func_23_invoker
+[fuzz-exec] export func_25_invoker
+[fuzz-exec] export func_27
+[fuzz-exec] note result: func_27 => i32x4 0x00000000 0x00000000 0x00000000 0x00000000
+[fuzz-exec] export func_28_invoker
+[exception thrown: tag$1 -12966]
+wasm-opt: /home/tamaron/work/binaryen/src/ir/eh-utils.cpp:122: void wasm::EHUtils::handleBlockNestedPop(wasm::Try*, wasm::Function*, wasm::Module&): Assertion `pop && "Pop has not been found in this catch"' failed.

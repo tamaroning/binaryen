@@ -1,0 +1,79 @@
+[fuzz-exec] export global$
+[LoggingExternalInterface logging -128]
+[fuzz-exec] export global$_5
+[LoggingExternalInterface logging 0]
+[fuzz-exec] export func_14_invoker
+[LoggingExternalInterface logging -16 -1]
+[LoggingExternalInterface logging -16 -1]
+[fuzz-exec] export func_17_invoker
+[fuzz-exec] export func_21_invoker
+[fuzz-exec] export func_26_invoker
+exception thrown: RuntimeError: memory access out of bounds
+[fuzz-exec] export func_28_invoker
+[fuzz-exec] export func_30
+exception thrown: RuntimeError: unreachable
+[fuzz-exec] export func_31_invoker
+exception thrown: RuntimeError: unreachable
+[fuzz-exec] export func_34
+exception thrown: Error: js exception
+[fuzz-exec] export func_36_invoker
+[fuzz-exec] export func_40_invoker
+[fuzz-exec] export func_43_invoker
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0]
+exception thrown: RuntimeError: unreachable
+[fuzz-exec] export func_45_invoker

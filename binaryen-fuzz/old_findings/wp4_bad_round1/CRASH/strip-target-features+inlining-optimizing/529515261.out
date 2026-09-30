@@ -1,0 +1,45 @@
+[fuzz-exec] export global$
+[LoggingExternalInterface logging -256]
+[fuzz-exec] export func
+[LoggingExternalInterface logging string("93\u00a3\udf48")]
+[LoggingExternalInterface logging 33554432]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging -60 -1]
+[fuzz-exec] note result: func => object(null)
+[fuzz-exec] export func_invoker
+[LoggingExternalInterface logging string("93\u00a3\udf48")]
+[LoggingExternalInterface logging 33554432]
+[LoggingExternalInterface logging null]
+[LoggingExternalInterface logging -60 -1]
+[fuzz-exec] export func_13_invoker
+[fuzz-exec] export func_15
+[exception thrown: imported-wasm-tag 185]
+[fuzz-exec] export func_17
+[fuzz-exec] note result: func_17 => object(null)
+[fuzz-exec] export func_17_invoker
+[fuzz-exec] export func_20_invoker
+[fuzz-exec] export func_22
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export func_23
+[trap unaligned atomic operation]
+[fuzz-exec] export func_23_invoker
+[trap unaligned atomic operation]
+[fuzz-exec] export func_25_invoker
+[fuzz-exec] export func_27_invoker
+[LoggingExternalInterface logging 0]
+[trap unreachable]
+[fuzz-exec] export func_29
+[fuzz-exec] export func_31_invoker
+[fuzz-exec] export func_33_invoker
+[fuzz-exec] export func_35
+[fuzz-exec] note result: func_35 => 18446744073709551615
+[fuzz-exec] export func_35_invoker
+[fuzz-exec] export func_38_invoker
+[fuzz-exec] export func_41
+[fuzz-exec] note result: func_41 => i32x4 0x00000000 0x00000000 0x00000000 0x00000000
+[fuzz-exec] export func_42_invoker
+[fuzz-exec] export func_44
+[trap null ref]
+[fuzz-exec] export func_45_invoker
+[exception thrown: tag$0 1]
+wasm-opt: /home/tamaron/work/binaryen/src/ir/eh-utils.cpp:122: void wasm::EHUtils::handleBlockNestedPop(wasm::Try*, wasm::Function*, wasm::Module&): Assertion `pop && "Pop has not been found in this catch"' failed.

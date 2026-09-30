@@ -1,0 +1,82 @@
+[fuzz-exec] export global$
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export global$_2
+[LoggingExternalInterface logging i32x4 0xe452fffa 0xffc3ffe2 0x66240b57 0x7c28f31a]
+[fuzz-exec] export global$_3
+[LoggingExternalInterface logging -512]
+[fuzz-exec] export global$_5
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export global$_7
+[LoggingExternalInterface logging externref(105)]
+[fuzz-exec] export global$_9
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export global$_11
+[LoggingExternalInterface logging function]
+[fuzz-exec] export global$_13
+[LoggingExternalInterface logging null]
+[fuzz-exec] export global$_15
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export global$_19
+[LoggingExternalInterface logging -0.013000000000000012]
+[fuzz-exec] export ref_func_target_invoker
+[trap unreachable]
+[fuzz-exec] export ref_func_target_1_invoker
+[trap unreachable]
+[fuzz-exec] export func_invoker
+[LoggingExternalInterface logging string("\u00a3")]
+[LoggingExternalInterface logging string("\u00a3")]
+[fuzz-exec] export func_15_invoker
+[fuzz-exec] export func_17
+[LoggingExternalInterface logging i32x4 0xffda2d0e 0xc1efffff 0x00000000 0xc0500000]
+[trap unaligned atomic operation]
+[fuzz-exec] export func_20
+[trap string oob]
+[fuzz-exec] export func_20_invoker
+[trap string oob]
+[fuzz-exec] export func_23
+[LoggingExternalInterface logging function]
+[fuzz-exec] export func_23_invoker
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[wasm-validator error in function 9] unexpected false: , on 
+(try (result (ref $11))
+ (do
+  (local.get $5)
+ )
+ (catch $tag$0
+  (drop
+   (block
+    (drop
+     (pop (ref null $0))
+    )
+    (unreachable)
+   )
+  )
+  (global.get $global$0)
+ )
+ (catch_all
+  (local.get $5)
+ )
+)
+catch's body (tag$0)'s pop's location is not valid[wasm-validator error in function 13] unexpected false: , on 
+(try (result (ref (exact $6)))
+ (do
+  (ref.func $1)
+ )
+ (catch $tag$0
+  (drop
+   (block
+    (drop
+     (pop (ref null $0))
+    )
+    (unreachable)
+   )
+  )
+  (ref.func $1)
+ )
+)
+catch's body (tag$0)'s pop's location is not validFatal: error after opts

@@ -1,0 +1,78 @@
+[fuzz-exec] export global$_9
+[LoggingExternalInterface logging 2147483646.556]
+[fuzz-exec] export global$_10
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export global$_12
+[LoggingExternalInterface logging 32767]
+[fuzz-exec] export global$_13
+[LoggingExternalInterface logging i31ref(16777215)]
+[fuzz-exec] export global$_16
+[LoggingExternalInterface logging 43]
+[fuzz-exec] export ref_func_target_1_invoker
+[trap unreachable]
+[fuzz-exec] export func
+[fuzz-exec] note result: func => 32767
+[fuzz-exec] export func_15
+[fuzz-exec] note result: func_15 => i32x4 0x003fffff 0x00000000 0x0000ffff 0x00000000
+[fuzz-exec] export func_15_invoker
+[fuzz-exec] export func_17_invoker
+[exception thrown: imported-wasm-tag -32]
+[fuzz-exec] export func_20
+[fuzz-exec] note result: func_20 => 0
+[fuzz-exec] export func_21
+[fuzz-exec] note result: func_21 => null
+[fuzz-exec] export func_21_invoker
+[fuzz-exec] export func_24
+[fuzz-exec] note result: func_24 => 122
+[fuzz-exec] export func_24_invoker
+[fuzz-exec] export func_26
+[fuzz-exec] note result: func_26 => i32x4 0x00000000 0x00000000 0x00000000 0x00000000
+[fuzz-exec] export func_28
+[fuzz-exec] export func_29_invoker
+[trap unreachable]
+[fuzz-exec] export func_34
+[exception thrown: imported-js-tag jserror]
+[fuzz-exec] export func_35
+[fuzz-exec] note result: func_35 => -27635
+[fuzz-exec] export func_35_invoker
+[wasm-validator error in function 17] unexpected false: , on 
+(try (result v128)
+ (do
+  (loop $label
+   (if
+    (i32.eqz
+     (global.get $global$24)
+    )
+    (then
+     (global.set $global$24
+      (i32.const 100)
+     )
+     (unreachable)
+    )
+   )
+   (global.set $global$24
+    (i32.sub
+     (global.get $global$24)
+     (i32.const 1)
+    )
+   )
+   (call $fimport$7
+    (local.get $4)
+   )
+   (br $label)
+  )
+  (unreachable)
+ )
+ (catch $tag$0
+  (drop
+   (block
+    (drop
+     (pop (ref $11))
+    )
+    (unreachable)
+   )
+  )
+  (local.get $25)
+ )
+)
+catch's body (tag$0)'s pop's location is not validFatal: error after opts

@@ -1,0 +1,1 @@
+--remove-unused-nonfunction-module-elements --strip-toolchain-annotations -O1 --closed-world

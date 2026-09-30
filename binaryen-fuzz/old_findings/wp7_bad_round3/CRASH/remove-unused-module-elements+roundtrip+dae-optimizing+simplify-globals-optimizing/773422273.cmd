@@ -1,0 +1,2 @@
+/home/tamaron/work/binaryen/bin/wasm-opt wp7/mut.wat --all-features --disable-fp16 --disable-shared-everything --disable-stack-switching --fuzz-exec --remove-unused-module-elements --roundtrip --dae-optimizing --simplify-globals-optimizing -o /dev/null --closed-world
+/home/tamaron/work/binaryen/bin/wasm-opt -ttf wp7/in.bin --all-features --disable-fp16 --disable-shared-everything --disable-stack-switching -o wp7/gen.wasm --closed-world --no-fuzz-oob

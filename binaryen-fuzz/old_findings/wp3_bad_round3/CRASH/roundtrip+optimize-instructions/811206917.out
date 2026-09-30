@@ -1,0 +1,26 @@
+[fuzz-exec] export global$
+[LoggingExternalInterface logging i32x4 0x00000000 0x00000000 0x00000000 0x00000000]
+[fuzz-exec] export global$_2
+[LoggingExternalInterface logging object(null)]
+[fuzz-exec] export global$_8
+[LoggingExternalInterface logging null]
+[fuzz-exec] export func
+[LoggingExternalInterface logging function]
+[fuzz-exec] note result: func => 4294967240
+[fuzz-exec] export func_invoker
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[LoggingExternalInterface logging function]
+[fuzz-exec] export func_11
+[LoggingExternalInterface logging string("\u00a3\u00a3")]
+[trap unaligned atomic operation]
+[fuzz-exec] export func_12_invoker
+[exception thrown: imported-js-tag jserror]
+[fuzz-exec] export func_16
+[LoggingExternalInterface logging 0]
+[fuzz-exec] note result: func_16 => 0
+[fuzz-exec] export func_18_invoker
+[fuzz-exec] export func_20_invoker
+[exception thrown: imported-js-tag jserror]
+wasm-opt: /home/tamaron/work/binaryen/src/ir/eh-utils.cpp:122: void wasm::EHUtils::handleBlockNestedPop(wasm::Try*, wasm::Function*, wasm::Module&): Assertion `pop && "Pop has not been found in this catch"' failed.

@@ -1,0 +1,63 @@
+[fuzz-exec] export func
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging 0 0]
+[fuzz-exec] note result: func => -nan:0x7fb053
+[fuzz-exec] export func_invoker
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging -1 -129]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging -28 -1]
+[LoggingExternalInterface logging 0]
+[LoggingExternalInterface logging -256 -1]
+[fuzz-exec] export func_8
+[exception thrown: imported-wasm-tag -126]
+[fuzz-exec] export func_8_invoker
+[exception thrown: imported-wasm-tag -126]
+[fuzz-exec] export func_10_invoker
+[trap unaligned atomic operation]
+[fuzz-exec] export func_12
+[LoggingExternalInterface logging -nan:0xfffffffffaf2f]
+[LoggingExternalInterface logging 0]
+[fuzz-exec] note result: func_12 => function
+-2147483648
+string("\ud800\udf48\ud800")
+[fuzz-exec] export func_15_invoker
+[fuzz-exec] export func_17
+[fuzz-exec] export func_17_invoker
+[fuzz-exec] export func_19_invoker
+[LoggingExternalInterface logging 0]
+[trap unreachable]
+[fuzz-exec] export func_21
+[fuzz-exec] note result: func_21 => function
+[fuzz-exec] export func_24_invoker
+[fuzz-exec] export func_26
+[fuzz-exec] note result: func_26 => -71
+[fuzz-exec] export func_26_invoker
+[fuzz-exec] export func_28_invoker
+[LoggingExternalInterface logging 262144]
+[LoggingExternalInterface logging 2147483648]
+[exception thrown: imported-js-tag jserror]
+[fuzz-exec] export func_30_invoker
+[fuzz-exec] export func_33_invoker
+[LoggingExternalInterface logging i32x4 0x00fc00fc 0x00fc00fc 0x00fc00fc 0x00fc00fc]
+[LoggingExternalInterface logging 0 0]
+[LoggingExternalInterface logging i32x4 0x00fc00fc 0x00fc00fc 0x00fc00fc 0x00fc00fc]
+[LoggingExternalInterface logging 0 0]
+[LoggingExternalInterface logging i32x4 0x00fc00fc 0x00fc00fc 0x00fc00fc 0x00fc00fc]
+[LoggingExternalInterface logging 0 0]
+[LoggingExternalInterface logging i32x4 0x00fc00fc 0x00fc00fc 0x00fc00fc 0x00fc00fc]
+[LoggingExternalInterface logging 0 0]
+[LoggingExternalInterface logging i32x4 0x00fc00fc 0x00fc00fc 0x00fc00fc 0x00fc00fc]
+[LoggingExternalInterface logging 0 0]
+[LoggingExternalInterface logging i32x4 0x00fc00fc 0x00fc00fc 0x00fc00fc 0x00fc00fc]
+[LoggingExternalInterface logging 0 0]
+[fuzz-exec] export func_35
+[fuzz-exec] note result: func_35 => 0
+[fuzz-exec] export func_35_invoker
+[fuzz-exec] export func_37
+[LoggingExternalInterface logging -255]
+[fuzz-exec] note result: func_37 => 9223372036854775808
+[fuzz-exec] export func_38
+[LoggingExternalInterface logging i32x4 0x00000000 0xfffe0000 0xffffffff 0x00000000]
+[trap out of bounds segment access in memory.copy]
+warning: no passes specified, not doing any work
