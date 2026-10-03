@@ -9,6 +9,8 @@
 /gcfuzz/*/
 /interim/*/
 /ufuzz/*/
+# ...except the coverage scripts (their outputs go elsewhere)
+!/ufuzz/cov/
 /ufuzz/config.json
 /ufuzz/final_report.txt
 /ufuzz/final_stats.json
@@ -18,3 +20,12 @@ pids
 *.pid
 *.log
 __pycache__/
+
+# effcheck: run outputs and the compiled harness
+/effcheck/out*/
+/effcheck/canreorder
+
+# probe directories: generated modules and per-run work directories
+/probe-*/*/
+/probe-*/*.wasm
+/probe-*/*.dat
