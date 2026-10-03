@@ -25,8 +25,75 @@ Adding a feature (floats, bulk memory, tables, exceptions, SIMD):
 from wmod import N, NUM, is_ref
 
 FEATURES_ON = {"int", "mem", "mem64", "multimem", "memgrow", "global", "ctl", "loop", "call",
-               "gc", "cast", "i31", "select", "trap", "bulk", "float", "table", "data", "exn"}
+               "gc", "cast", "i31", "select", "trap", "bulk", "float", "table", "data", "exn",
+               # SIMD / relaxed SIMD, calls between generated functions, call_ref and typed tables,
+               # control-flow in value position, more GC, and the bug-shape rows (rows_shapes.py)
+               "simd", "relaxed", "icall", "callref", "ctl2", "gc2", "sh_dup", "sh_noret", "sh_alloc",
+               "sh_tinit", "sh_nan", "sh_edge", "tail", "ext", "arrfill", "arrelem"}
 VALTYPES_ON = ["i32", "i64", "f32", "f64"]
+# Rows the exwasm-0930 snapshot rejects for the whole module (return_call*,
+# extern.convert_any / any.convert_extern, array.fill / array.init_data; array.new_elem / array.init_elem are assumed to be
+# rejected the same way: the snapshot reports them unsupported, tag "arrelem"):
+# only modules flagged "wide" contain them, and those go through the
+# crash / validity / V8 oracle only.
+WIDE_TAGS = {"mv", "rec"}
+# atomics: unsupported by exwasm-0930 as well.  Off unless config.json "features"
+# lists "atomic" (all modules; for a snapshot that derives them) or "atomic_wide"
+# (wide modules only).
+OPTIONAL_TAGS = {"atomic"}
+# row families that can be boosted for a whole module (Gen.focus)
+FOCUS_TAGS = {"simd", "relaxed", "icall", "callref", "ctl2", "gc2", "float", "table", "bulk", "exn", "loop",
+              "cast", "mem", "memgrow", "data", "select", "sh_dup", "sh_noret", "sh_alloc", "sh_tinit",
+              "sh_nan", "sh_edge"}
+
+_CFG = {"t": 0.0, "v": {}}
+
+
+def _config():
+    import time
+    if time.time() - _CFG["t"] > 5:
+        _CFG["t"] = time.time()
+        try:
+            import json
+            import os
+            with open(os.environ.get("UFUZZ_CONFIG") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")) as f:
+                _CFG["v"] = json.load(f)
+        except (OSError, ValueError):
+            _CFG["v"] = {}
+        import os
+        if os.environ.get("UFUZZ_FEATURES_ADD"):  # tests: comma-separated tags
+            _CFG["v"] = dict(_CFG["v"], features_add=os.environ["UFUZZ_FEATURES_ADD"].split(","))
+    return _CFG["v"]
+
+
+def features_for(m):
+    """row feature tags enabled for module `m`"""
+    cf = _config()
+    on = set(FEATURES_ON)
+    # config "wide_tags" lists the tags kept out of ordinary modules (default: multi-value, rec groups;
+    # exwasm-0930: also tail, ext, arrfill, arrelem)
+    wide_tags = set(cf.get("wide_tags") or WIDE_TAGS)
+    on -= wide_tags
+    extra = set(cf.get("features_add") or [])
+    on |= (extra & OPTIONAL_TAGS)
+    on |= (extra - OPTIONAL_TAGS - {"atomic_wide"})
+    if m.meta.get("wide"):
+        on |= wide_tags
+        if "atomic_wide" in extra:
+            on.add("atomic")
+    if m.meta.get("noeh"):
+        on.discard("exn")
+    on -= set(cf.get("features_remove") or [])
+    return on
+
+
+SETUPS = []
+
+
+def module_setup(r, m):
+    """module-level parts some rows need (typed tables, ...), registered by the row modules"""
+    for fn in SETUPS:
+        fn(r, m)
 
 B32 = [0, 1, 2, -1, -2, 3, 4, 7, 8, 15, 16, 31, 32, 63, 64, 0x7f, 0x80, 0xff, 0x100, 0x7fff, 0x8000,
        0xffff, 0x10000, 0x7fffffff, -0x80000000, -0x7fffffff, 0xfffc, 0xfffd, 0xfffe, 0x3fffffff,
@@ -120,7 +187,7 @@ def _incr(g, want, d):
 
 @row("global.get", "global", 1.2, "any")
 def _gget(g, want, d):
-    gs = [n for n, t, *_ in g.m.globals if t == want]
+    gs = [n for n, t, *_ in g.m.globals if t == want or (is_ref(t) and is_ref(want) and g.ctx.sub(t, want))]
     return N("global.get", [g.r.choice(gs)]) if gs else None
 
 
@@ -184,7 +251,7 @@ def _msize(g, want, d):
     return N("memory.size", [g.m.memories[k][0]])
 
 
-@row("memory.grow", "memgrow", .25, "int")
+@row("memory.grow", "memgrow", .5, "int")
 def _mgrow(g, want, d):
     ks = [k for k, mm in enumerate(g.m.memories) if mm[1] == want]
     if not ks:
@@ -462,8 +529,7 @@ def _alen(g, want, d):
 def _rnull(g, want, d):
     if not want[1]:
         return None
-    h = want[2]
-    return N("ref.null", [h if h.startswith("$") else "none"])
+    return N("ref.null", [g.null_heap(want[2])])
 
 
 @row("ref.is_null", "gc", .8, "i32")
@@ -540,7 +606,7 @@ def _broncast(g, want, d):
 @row("br_on_null", "cast", .6, "any")
 def _bronnull(g, want, d):
     # (block $l (result want) (use (br_on_null $l0 e)) ...) where $l0 carries nothing
-    if want is None or is_ref(want):
+    if want is None or is_ref(want) or want == "v128":
         return None
     lab = g.newlab()
     t = g.any_ref()
@@ -660,19 +726,25 @@ def _throw(g, want, d):
 
 def _try_body(g, d):
     body = g.body(None, d + 1)
-    if g.r.random() < .6:
+    x = g.r.random()
+    if x < .45:
         body.append(_throw(g, None, d + 1))
+    elif x < .7 and "$th3" in getattr(g.m, "helpers", []):
+        # an exception thrown by a callee (th3 throws when its argument is 3)
+        body.append(N("drop", [], [N("call", ["$th3"], [g.expr("i32", d + 1)])]))
     return body
 
 
-@row("try_table(catch)", "exn", .6, "i32")
+@row("try_table(catch)", "exn", .6, "any")
 def _try_catch(g, want, d):
-    if want != "i32" or d > 3:
+    if want not in ("i32", "i64") or d > 3:
+        return None
+    tags = [t for t, ps in g.m.tags if ps == [want]]
+    if not tags:
         return None
     lab = g.newlab()
-    tag = g.m.tags[0][0]
-    inner = N("try_table", [["catch", tag, lab]], _try_body(g, d))
-    return N("block", [lab, ["result", "i32"]], [inner, g.expr("i32", d + 1)])
+    inner = N("try_table", [["catch", tags[0], lab]], _try_body(g, d))
+    return N("block", [lab, ["result", want]], [inner, g.expr(want, d + 1)])
 
 
 @row("try_table(catch_all)", "exn", .6, "void")
@@ -692,3 +764,11 @@ def _try_ref(g, want, d):
     inner = N("try_table", [["catch_all_ref", lab]], _try_body(g, d))
     caught = N("block", [lab, ["result", "exnref"]], [inner, N("br", [done])])
     return N("block", [done], [N("throw_ref", [], [caught])])
+
+
+# the remaining row families live in their own modules and register into ROWS
+import rows_more  # noqa: E402,F401
+import rows_simd  # noqa: E402,F401
+import rows_shapes  # noqa: E402,F401
+import rows_cov  # noqa: E402,F401
+import decls  # noqa: E402,F401

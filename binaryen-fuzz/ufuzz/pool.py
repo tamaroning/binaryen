@@ -3,7 +3,7 @@ memories, callees and types they need, so that mut.Mut.import_entry can
 rename them into another module."""
 import re
 
-from wmod import LOADS, STORES, free_labels, is_ref, mem_imm, vt_str
+from wmod import ATOMIC, LOADS, STORES, VMEM, free_labels, is_ref, mem_imm, vmem_name, vt_str
 
 POOL_OPS_BAD = ("return",)
 
@@ -64,8 +64,8 @@ def entry_of(m, f, n, eid, src):
             if g is None or is_ref(g[1]):
                 return None
             globs[x.imms[0]] = [g[1], bool(g[2] or op == "global.set")]
-        elif op in LOADS or op in STORES or op in ("memory.size", "memory.grow"):
-            mi = mem_imm(x)
+        elif op in LOADS or op in STORES or op in VMEM or op in ATOMIC or op in ("memory.size", "memory.grow"):
+            mi = vmem_name(x) if (op in VMEM or op in ATOMIC) else mem_imm(x)
             if mi is None:
                 if not memnames:
                     return None

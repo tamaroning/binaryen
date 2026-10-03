@@ -149,6 +149,7 @@ class TypeDef:
         self.final = final
         self.params = params or []
         self.results = results or []
+        self.rec = None  # rec group id: consecutive types with the same id share a (rec ...)
 
     def text(self, ren=lambda n: n):
         def st(s):
@@ -304,8 +305,18 @@ class Module:
 
     def text(self):
         out = ["(module"]
-        for t in self.types:
-            out.append("  " + t.text())
+        i = 0
+        while i < len(self.types):
+            t = self.types[i]
+            rec = getattr(t, "rec", None)
+            j = i + 1
+            while rec is not None and j < len(self.types) and getattr(self.types[j], "rec", None) == rec:
+                j += 1
+            if j - i > 1:
+                out.append("  (rec " + " ".join(x.text() for x in self.types[i:j]) + ")")
+            else:
+                out.append("  " + t.text())
+            i = j
         for n, ps, rs in self.ftypes:
             out.append("  (type %s (func%s%s))" % (n, "".join(" (param %s)" % vt_str(p) for p in ps),
                                                    "".join(" (result %s)" % vt_str(r) for r in rs)))
@@ -316,8 +327,9 @@ class Module:
         for k, (n, at, mn, mx) in enumerate(self.memories):
             out.append('  (memory %s (export "m%d") %s%d%s)' % (n, k, "i64 " if at == "i64" else "", mn,
                                                                "" if mx is None else " %d" % mx))
+        inits = getattr(self, "table_inits", {})
         for n, size in self.tables:
-            out.append("  (table %s %d funcref)" % (n, size))
+            out.append("  (table %s %d funcref%s)" % (n, size, " " + inits[n] if n in inits else ""))
         for n, ps in self.tags:
             out.append("  (tag %s%s)" % (n, "".join(" (param %s)" % vt_str(p) for p in ps)))
         for n, t, mut, init, exp in self.globals:
@@ -401,6 +413,15 @@ def parse_typedef(x):
         td.fnames = []
         return td
     raise Unsupported("comptype " + str(body[0]))
+
+
+def vmem_name(node):
+    """memory name of a SIMD / atomic memory op: only `$name` immediates (a
+    lane index is also a bare number)"""
+    for i in node.imms:
+        if isinstance(i, str) and i.startswith("$"):
+            return i
+    return None
 
 
 def parse_module(text, keep_bad_funcs=False):
@@ -625,6 +646,139 @@ def _num():
 
 _num()
 
+
+# ---- SIMD: op -> (number of immediates, operand types, result type)
+SIMD = {}
+# v128 memory ops: op -> (kind, natural alignment in bytes); kind is load/store/loadlane/storelane
+VMEM = {}
+RELAXED = set()
+
+
+def _simd():
+    V = "v128"
+
+    def add(op, nimm, ps, r, relaxed=False):
+        SIMD[op] = (nimm, ps, r)
+        if relaxed:
+            RELAXED.add(op)
+
+    shapes = {"i8x16": ("i32", 16), "i16x8": ("i32", 8), "i32x4": ("i32", 4), "i64x2": ("i64", 2),
+              "f32x4": ("f32", 4), "f64x2": ("f64", 2)}
+    for sh, (sc, nl) in shapes.items():
+        add(sh + ".splat", 0, [sc], V)
+        if sh in ("i8x16", "i16x8"):
+            add(sh + ".extract_lane_s", 1, [V], "i32")
+            add(sh + ".extract_lane_u", 1, [V], "i32")
+        else:
+            add(sh + ".extract_lane", 1, [V], sc)
+        add(sh + ".replace_lane", 1, [V, sc], V)
+        for o in ("add", "sub", "neg", "abs", "eq", "ne"):
+            add("%s.%s" % (sh, o), 0, [V] if o in ("neg", "abs") else [V, V], V)
+        if sh[0] == "i":
+            if sh != "i8x16":
+                add(sh + ".mul", 0, [V, V], V)
+            for o in ("lt_s", "gt_s", "le_s", "ge_s"):
+                add("%s.%s" % (sh, o), 0, [V, V], V)
+            for o in ("shl", "shr_s", "shr_u"):
+                add("%s.%s" % (sh, o), 0, [V, "i32"], V)
+            add(sh + ".all_true", 0, [V], "i32")
+            add(sh + ".bitmask", 0, [V], "i32")
+            if sh != "i64x2":
+                for o in ("lt_u", "gt_u", "le_u", "ge_u", "min_s", "min_u", "max_s", "max_u"):
+                    add("%s.%s" % (sh, o), 0, [V, V], V)
+            if sh in ("i8x16", "i16x8"):
+                for o in ("avgr_u", "add_sat_s", "add_sat_u", "sub_sat_s", "sub_sat_u"):
+                    add("%s.%s" % (sh, o), 0, [V, V], V)
+        else:
+            for o in ("mul", "div", "min", "max", "pmin", "pmax", "lt", "gt", "le", "ge"):
+                add("%s.%s" % (sh, o), 0, [V, V], V)
+            for o in ("sqrt", "ceil", "floor", "trunc", "nearest"):
+                add("%s.%s" % (sh, o), 0, [V], V)
+    add("i8x16.popcnt", 0, [V], V)
+    add("i8x16.narrow_i16x8_s", 0, [V, V], V)
+    add("i8x16.narrow_i16x8_u", 0, [V, V], V)
+    add("i16x8.narrow_i32x4_s", 0, [V, V], V)
+    add("i16x8.narrow_i32x4_u", 0, [V, V], V)
+    for dst, src in (("i16x8", "i8x16"), ("i32x4", "i16x8"), ("i64x2", "i32x4")):
+        for half in ("low", "high"):
+            for sg in ("s", "u"):
+                add("%s.extend_%s_%s_%s" % (dst, half, src, sg), 0, [V], V)
+                add("%s.extmul_%s_%s_%s" % (dst, half, src, sg), 0, [V, V], V)
+    for dst, src in (("i16x8", "i8x16"), ("i32x4", "i16x8")):
+        for sg in ("s", "u"):
+            add("%s.extadd_pairwise_%s_%s" % (dst, src, sg), 0, [V], V)
+    add("i16x8.q15mulr_sat_s", 0, [V, V], V)
+    add("i32x4.dot_i16x8_s", 0, [V, V], V)
+    for o in ("not",):
+        add("v128." + o, 0, [V], V)
+    for o in ("and", "or", "xor", "andnot"):
+        add("v128." + o, 0, [V, V], V)
+    add("v128.bitselect", 0, [V, V, V], V)
+    add("v128.any_true", 0, [V], "i32")
+    add("i8x16.swizzle", 0, [V, V], V)
+    add("i8x16.shuffle", 16, [V, V], V)
+    add("f32x4.convert_i32x4_s", 0, [V], V)
+    add("f32x4.convert_i32x4_u", 0, [V], V)
+    add("i32x4.trunc_sat_f32x4_s", 0, [V], V)
+    add("i32x4.trunc_sat_f32x4_u", 0, [V], V)
+    add("i32x4.trunc_sat_f64x2_s_zero", 0, [V], V)
+    add("i32x4.trunc_sat_f64x2_u_zero", 0, [V], V)
+    add("f64x2.convert_low_i32x4_s", 0, [V], V)
+    add("f64x2.convert_low_i32x4_u", 0, [V], V)
+    add("f32x4.demote_f64x2_zero", 0, [V], V)
+    add("f64x2.promote_low_f32x4", 0, [V], V)
+    # relaxed SIMD (implementation-defined results; fixed per implementation)
+    add("i8x16.relaxed_swizzle", 0, [V, V], V, True)
+    for o in ("s", "u"):
+        add("i32x4.relaxed_trunc_f32x4_" + o, 0, [V], V, True)
+        add("i32x4.relaxed_trunc_f64x2_%s_zero" % o, 0, [V], V, True)
+    for o in ("madd", "nmadd"):
+        add("f32x4.relaxed_" + o, 0, [V, V, V], V, True)
+        add("f64x2.relaxed_" + o, 0, [V, V, V], V, True)
+    for sh in ("i8x16", "i16x8", "i32x4", "i64x2"):
+        add(sh + ".relaxed_laneselect", 0, [V, V, V], V, True)
+    for o in ("min", "max"):
+        add("f32x4.relaxed_" + o, 0, [V, V], V, True)
+        add("f64x2.relaxed_" + o, 0, [V, V], V, True)
+    add("i16x8.relaxed_q15mulr_s", 0, [V, V], V, True)
+    add("i16x8.relaxed_dot_i8x16_i7x16_s", 0, [V, V], V, True)
+    add("i32x4.relaxed_dot_i8x16_i7x16_add_s", 0, [V, V, V], V, True)
+    # memory
+    VMEM["v128.load"] = ("load", 16)
+    VMEM["v128.store"] = ("store", 16)
+    for n, a in (("load8x8_s", 8), ("load8x8_u", 8), ("load16x4_s", 8), ("load16x4_u", 8), ("load32x2_s", 8),
+                 ("load32x2_u", 8), ("load8_splat", 1), ("load16_splat", 2), ("load32_splat", 4),
+                 ("load64_splat", 8), ("load32_zero", 4), ("load64_zero", 8)):
+        VMEM["v128." + n] = ("load", a)
+    for w in (8, 16, 32, 64):
+        VMEM["v128.load%d_lane" % w] = ("loadlane", w // 8)
+        VMEM["v128.store%d_lane" % w] = ("storelane", w // 8)
+
+
+_simd()
+
+# ---- threads (atomics): op -> (operand types after the address, result, access bytes)
+ATOMIC = {}
+
+
+def _atomic():
+    for t, widths in (("i32", (8, 16, 32)), ("i64", (8, 16, 32, 64))):
+        full = int(t[1:])
+        for w in widths:
+            suf = "" if w == full else "%d_u" % w
+            ATOMIC["%s.atomic.load%s" % (t, "" if w == full else str(w) + "_u")] = ([], t, w // 8)
+            ATOMIC["%s.atomic.store%s" % (t, "" if w == full else str(w))] = ([t], None, w // 8)
+            for o in ("add", "sub", "and", "or", "xor", "xchg"):
+                ATOMIC["%s.atomic.rmw%s.%s%s" % (t, "" if w == full else str(w), o, "" if w == full else "_u")] = \
+                    ([t], t, w // 8)
+            ATOMIC["%s.atomic.rmw%s.cmpxchg%s" % (t, "" if w == full else str(w), "" if w == full else "_u")] = \
+                ([t, t], t, w // 8)
+            del suf
+    ATOMIC["memory.atomic.notify"] = (["i32"], "i32", 4)
+
+
+_atomic()
+
 LOADS = {"i32.load": ("i32", 4), "i32.load8_s": ("i32", 1), "i32.load8_u": ("i32", 1),
          "i32.load16_s": ("i32", 2), "i32.load16_u": ("i32", 2), "i64.load": ("i64", 8),
          "i64.load8_s": ("i64", 1), "i64.load8_u": ("i64", 1), "i64.load16_s": ("i64", 2),
@@ -651,7 +805,7 @@ FAMILY_FIXED = {
     "memory.fill": "bulk", "memory.copy": "bulk", "memory.init": "data", "data.drop": "data",
     "call_indirect": "table", "call_ref": "table", "ref.func": "table", "table.get": "table",
     "table.set": "table", "table.size": "table", "table.grow": "table",
-    "try": "exn", "try_table": "exn", "throw": "exn", "throw_ref": "exn", "rethrow": "exn",
+    "array.new_data": "gc.array", "try": "exn", "try_table": "exn", "throw": "exn", "throw_ref": "exn", "rethrow": "exn",
 }
 
 
@@ -662,6 +816,14 @@ def family(op):
         return "gc.struct"
     if op.startswith("array."):
         return "gc.array"
+    if op in SIMD or op in VMEM or op == "v128.const":
+        return "simd"
+    if op in ATOMIC or op == "atomic.fence":
+        return "atomic"
+    if op in ("extern.convert_any", "any.convert_extern"):
+        return "gc.ext"
+    if op in ("call_ref", "return_call", "return_call_ref", "return_call_indirect"):
+        return "table"
     if op in LOADS:
         return "float" if op[0] == "f" else "mem.load"
     if op in STORES:
@@ -692,7 +854,7 @@ FEAT_OF_FAMILY = {
     "ctl.br_table": "ctl", "ctl.return": "ctl", "ctl.loop": "loop", "ctl.unreachable": "trap",
     "select": "select", "call": "call", "gc.struct": "gc", "gc.array": "gc",
     "gc.null": "gcnull", "gc.cast": "cast", "gc.br_on": "cast", "gc.eq": "gc", "gc.i31": "i31",
-    "float": "float", "simd": "simd", "bulk": "bulk", "data": "data", "table": "table", "exn": "exn",
+    "float": "float", "simd": "simd", "atomic": "atomic", "gc.ext": "gc", "bulk": "bulk", "data": "data", "table": "table", "exn": "exn",
 }
 
 
@@ -707,6 +869,7 @@ class TypeCtx:
         self.tags = dict(getattr(m, "tags", []))
         self.mems = {mm[0]: mm for mm in m.memories}
         self.memlist = [mm[0] for mm in m.memories]
+        self.ttypes = dict(m.meta.get("ttypes", {}))
 
     # heap subtyping
     def heap_sup(self, h):
@@ -856,6 +1019,39 @@ class Typer:
             ps, r = NUM[op]
             self.kids(n)
             return r
+        if op in SIMD:
+            self.kids(n)
+            return SIMD[op][2]
+        if op == "v128.const":
+            return "v128"
+        if op in VMEM:
+            c.mem_at(vmem_name(n))
+            self.kids(n)
+            return "v128" if VMEM[op][0] in ("load", "loadlane") else None
+        if op in ATOMIC:
+            c.mem_at(vmem_name(n))
+            self.kids(n)
+            return ATOMIC[op][1]
+        if op == "atomic.fence":
+            return None
+        if op in ("extern.convert_any", "any.convert_extern"):
+            (a,) = self.kids(n)
+            nl = a[1] if is_ref(a) else True
+            return ("ref", nl, "extern" if op == "extern.convert_any" else "any")
+        if op == "call_ref":
+            self.kids(n)
+            ft = n.imms[0]
+            if ft not in c.ftypes:
+                raise Unsupported("call_ref type")
+            rs = c.ftypes[ft][1]
+            return rs[0] if rs else None
+        if op in ("return_call", "return_call_ref", "return_call_indirect"):
+            self.kids(n)
+            return "unr"
+        if op in ("array.fill", "array.init_data", "array.init_elem"):
+            self.kids(n)
+            self.ctype(n.imms[0], "array")
+            return None
         if op.endswith(".const") and op[:3] in ("i32", "i64", "f32", "f64"):
             return op[:3]
         if op == "local.get":
@@ -1015,7 +1211,7 @@ class Typer:
             self.kids(n)
             c.field(n.imms[0], n.imms[1])
             return None
-        if op in ("array.new", "array.new_default", "array.new_fixed"):
+        if op in ("array.new", "array.new_default", "array.new_fixed", "array.new_data", "array.new_elem"):
             self.kids(n)
             self.ctype(n.imms[0], "array")
             return ("ref", False, n.imms[0])
@@ -1031,7 +1227,7 @@ class Typer:
             return ("ref", False, "func")
         if op == "table.get":
             self.kids(n)
-            return ("ref", True, "func")
+            return c.ttypes.get(n.imms[0], ("ref", True, "func"))
         if op in ("table.set", "table.fill", "table.copy", "table.init", "elem.drop", "memory.init", "data.drop"):
             self.kids(n)
             return None

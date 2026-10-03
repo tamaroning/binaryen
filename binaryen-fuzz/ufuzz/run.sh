@@ -6,10 +6,11 @@
 cd "$(dirname "$0")"
 N=${1:-4}
 rm -f STOP
-mkdir -p runs
+RUNS=${RUNS:-runs}
+mkdir -p $RUNS
 base=$(( $(date +%s) % 100000 * 1000 ))
 for k in $(seq 1 "$N"); do
-  w=runs/w$k
+  w=$RUNS/w$k
   mkdir -p $w
   rm -f $w/STOP
   setsid nohup python3 drive.py $w w$k $(( base + k * 100000000 )) >> $w/worker.log 2>&1 &

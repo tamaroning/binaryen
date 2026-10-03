@@ -73,7 +73,8 @@ SINGLE = [
 # passes that need a flag or a preceding pass
 PREREQ = {"optimize-added-constants": ["--low-memory-unused"],
           "optimize-added-constants-propagate": ["--low-memory-unused"],
-          "dfo": ["--flatten"], "rereloop": ["--flatten"], "optimize-stack-ir": ["--generate-stack-ir"]}
+          "dfo": ["--flatten"], "rereloop": ["--flatten"], "optimize-stack-ir": ["--generate-stack-ir"],
+          "i64-to-i32-lowering": ["--flatten"]}
 # flags that let a pass assume something about the program: a
 # counterexample under them is "suspect", not a bug candidate
 ASSUME = {"--low-memory-unused", "--closed-world", "--traps-never-happen", "--ignore-implicit-traps",
@@ -102,34 +103,140 @@ OLEVELS = [["-O1"], ["-O2"], ["-O3"], ["-O4"], ["-Os"], ["-Oz"], ["-O3", "--conv
            ["--generate-global-effects", "-O3"], ["-O4", "--inlining-optimizing", "-O4"]]
 
 
+# passes that refuse to run without --closed-world
+NEEDS_CLOSED = {"gsi", "cfp", "cfp-reftest", "type-refining", "type-refining-gufa", "gto", "abstract-type-refining",
+                "signature-pruning", "signature-refining", "unsubtyping", "type-merging", "remove-unused-types"}
+
+
 def pass_args(p):
-    return PREREQ.get(p, []) + ["--" + p]
+    return PREREQ.get(p, []) + (["--closed-world"] if p in NEEDS_CLOSED else []) + ["--" + p]
 
 
-def pick_config(r):
-    """(args, kind): kind is "single", "seq", "olevel" or "closed" """
+# Passes the rule-level campaign (and the bugs found so far) point to; they are sampled
+# `fruitful_weight` times as often as the rest, which keeps every other pass in play.
+FRUITFUL = {"optimize-instructions", "merge-blocks", "remove-unused-brs", "simplify-locals",
+            "simplify-locals-nostructure", "simplify-locals-notee", "simplify-locals-notee-nostructure",
+            "simplify-locals-nonesting", "heap-store-optimization", "code-pushing", "code-folding", "gsi",
+            "licm", "heap2local", "avoid-reinterprets", "alignment-lowering", "i64-to-i32-lowering",
+            "optimize-casts", "local-cse", "precompute", "precompute-propagate", "vacuum"}
+# configurations that go with a row family (module focus): sampled with `shape_bias`
+# probability when the module was generated with that focus
+_O = [["-O1"], ["-O2"], ["-O3"], ["-Os"]]
+SHAPE_CFG = {
+    "sh_dup": [["--optimize-instructions"], ["--local-cse"], ["--heap-store-optimization"], ["--precompute-propagate"],
+               ["--simplify-locals"], ["-O1"], ["-O2"], ["--optimize-instructions", "--vacuum"]],
+    "sh_noret": [["--merge-blocks"], ["--remove-unused-brs"], ["--simplify-locals"], ["--heap-store-optimization"],
+                 ["--code-pushing"], ["--code-folding"], ["--merge-blocks", "--vacuum"], ["-O1"], ["-O2"], ["-Os"]],
+    "sh_alloc": [["--licm"], ["--heap2local"], ["--licm", "--simplify-locals"], ["--heap2local", "--optimize-instructions"],
+                 ["-O2"], ["-O3"], ["--local-cse"], ["--optimize-casts"]],
+    "sh_tinit": [["--closed-world", "--gsi"], ["--closed-world", "--gsi", "-O2"], ["--closed-world", "-O3"],
+                 ["--closed-world", "-O2"], ["--closed-world", "--gufa"], ["--closed-world", "--cfp"],
+                 ["--closed-world", "--type-refining"], ["--closed-world", "--gsi", "--gufa", "--optimize-casts"]],
+    "sh_nan": [["--optimize-instructions"], ["--precompute"], ["--precompute-propagate"], ["-O1"], ["-O3"],
+               ["--avoid-reinterprets"], ["--optimize-instructions", "--precompute-propagate"]],
+    "sh_edge": [["--alignment-lowering"], ["--optimize-instructions"], ["--dealign"], ["--i64-to-i32-lowering"],
+                ["--pick-load-signs"], ["--memory-packing"], ["-O3"], ["--optimize-added-constants"]],
+    "simd": [["--optimize-instructions"], ["--precompute"], ["--simplify-locals"], ["--local-cse"], ["-O3"], ["-O1"]],
+    "relaxed": [["--optimize-instructions"], ["--precompute-propagate"], ["--local-cse"], ["-O3"], ["-O2"]],
+    "icall": [["--inlining-optimizing"], ["--inlining"], ["--dae-optimizing"], ["--duplicate-function-elimination"],
+              ["--merge-similar-functions"], ["--directize"], ["--monomorphize"], ["-O3"], ["-O2"], ["-O4"]],
+    "callref": [["--directize"], ["--inlining-optimizing"], ["--optimize-instructions"], ["-O3"], ["--closed-world", "-O3"]],
+    "gc2": [["--optimize-casts"], ["--heap2local"], ["--gufa"], ["--heap-store-optimization"], ["-O3"]],
+    "ctl2": [["--merge-blocks"], ["--remove-unused-brs"], ["--vacuum"], ["--dce"], ["--simplify-locals"], ["-O2"], ["-O1"],
+             ["--rereloop", "--flatten"]],
+    "exn": [["--merge-blocks"], ["--remove-unused-brs"], ["--translate-to-exnref"], ["--vacuum"], ["-O3"], ["-O1"]],
+    "float": [["--optimize-instructions"], ["--precompute"], ["--precompute-propagate"], ["--local-cse"], ["-O3"]],
+    "cast": [["--optimize-casts"], ["--gufa-cast-all"], ["--heap2local"], ["--closed-world", "-O3"], ["-O2"]],
+    "bulk": [["--optimize-instructions"], ["--memory-packing"], ["--alignment-lowering"], ["-O3"], ["--vacuum"]],
+    "table": [["--directize"], ["--remove-unused-module-elements"], ["--optimize-instructions"], ["-O3"]],
+    "loop": [["--licm"], ["--simplify-locals"], ["--remove-unused-brs"], ["--code-pushing"], ["-O2"], ["-O3"]],
+    "mem": [["--optimize-instructions"], ["--pick-load-signs"], ["--optimize-added-constants"], ["--dealign"], ["-O3"]],
+}
+CLOSED_O = [["--closed-world", "-O1"], ["--closed-world", "-O2"], ["--closed-world", "-O3"], ["--closed-world", "-Os"],
+            ["--closed-world", "-O4"], ["--closed-world", "-O3", "--converge"], ["--closed-world", "--gsi", "-O3"]]
+
+
+def wchoice(r, items, wts):
+    """weighted choice; `wts` maps item -> weight (default 1)"""
+    return r.choices(items, [wts.get(x, 1.0) for x in items])[0]
+
+
+def pass_weights(stats_pp=None, fruitful=2.5, boost=None):
+    """sampling weight of every pass: fruitful ones `fruitful` times, scaled by how often the pass
+    changed functions so far (0.6 .. 1.8), so passes that do nothing on the generated modules
+    are sampled less but never dropped"""
+    w = {}
+    for p in set(SINGLE) | set(SEQ_POOL):
+        w[p] = fruitful if p in FRUITFUL else 1.0
+        e = (stats_pp or {}).get(p)
+        if e and e.get("single_funcs", 0) >= 60:
+            rate = e.get("single_funcs_changed", 0) / e["single_funcs"]
+            w[p] *= min(1.8, 0.6 + 2.4 * rate)
+    for p, f in (boost or {}).items():
+        if p in w:
+            w[p] *= f
+    return w
+
+
+def extra_args(r, cf, c):
+    """`c` plus the options of config "extra_args" ([args, probability, passes or null]) drawn for it:
+    each is added with its probability when `c` runs one of its passes (or always, for null)"""
+    out = list(c)
+    for args, p, needs in cf.get("extra_args", []):
+        if r.random() < p and (not needs or any(("--" + x) in out or x in out for x in needs)):
+            out += [a for a in args if a not in out]
+    return out
+
+
+def pick_only(r, only, wts):
+    """(args, kind) drawing only from the passes in `only`: one pass, or a sequence of two to four"""
+    wts = wts if wts is not None else pass_weights()
+    n = 1 if r.random() < .4 else r.randint(2, 4)
+    seq = [wchoice(r, only, wts) for _ in range(n)]
+    out = []
+    for p in seq:
+        for y in pass_args(p):
+            if y in ("--closed-world", "--flatten") and y in out:
+                continue
+            out.append(y)
+    kind = "closed" if "--closed-world" in out else ("single" if n == 1 else "seq")
+    return out, kind
+
+
+def pick_config(r, wts=None, hint=None, shape_bias=0.3, only=None):
+    """(args, kind): kind is "single", "seq", "olevel" or "closed".  `wts` are pass weights
+    (pass_weights), `hint` the row family the module was generated for"""
+    wts = wts if wts is not None else pass_weights()
+    if only:
+        return pick_only(r, only, wts)
+    if hint in SHAPE_CFG and r.random() < shape_bias:
+        c = list(r.choice(SHAPE_CFG[hint]))
+        return c, ("closed" if "--closed-world" in c else "shape")
     x = r.random()
     pre = []
     if x < .75 and r.random() < .35:
         # levels change what many passes do (e.g. shrink-level in inlining, OI)
         pre = ["--optimize-level=%d" % r.randint(0, 4), "--shrink-level=%d" % r.randint(0, 2)]
-    if x < .42:
-        p = r.choice(SINGLE)
+    if x < .40:
+        p = wchoice(r, SINGLE, wts)
         if p in LOWERING and r.random() < .6:
-            p = r.choice(SINGLE)
-        return pre + pass_args(p), "single"
-    if x < .72:
-        seq = [r.choice(SEQ_POOL) for _ in range(r.randint(2, 5))]
+            p = wchoice(r, SINGLE, wts)
+        c = pre + pass_args(p)
+        return c, ("closed" if "--closed-world" in c else "single")
+    if x < .68:
+        seq = [wchoice(r, SEQ_POOL, wts) for _ in range(r.randint(2, 5))]
         out = list(pre)
         if r.random() < .2:
             out.append("--generate-global-effects")
         for p in seq:
             for y in pass_args(p):
-                if y.startswith("--low") and y in out:
+                if (y.startswith("--low") or y == "--closed-world") and y in out:
                     continue
                 out.append(y)
-        return out, "seq"
-    if x < .78:
+        return out, ("closed" if "--closed-world" in out else "seq")
+    if x < .79:
+        if r.random() < .45:
+            return list(r.choice(CLOSED_O)), "closed"
         return ["--closed-world"] + [("--" + p) for p in r.sample(CLOSED, r.randint(1, 3))] + \
             (["-O2"] if r.random() < .5 else []), "closed"
     return list(r.choice(OLEVELS)), "olevel"
@@ -157,17 +264,38 @@ MODULE_FACTS = {"simplify-globals", "simplify-globals-optimizing", "propagate-gl
 KNOWN_CEX = {frozenset(["alignment-lowering"]): "known: alignment-lowering writes part of a trapping store"}
 
 
-def expanded_passes(cf, c, mb):
+def cex_class(c, ps):
+    """(kind, suspect reason, known reason) of a counterexample under configuration `c` that ran
+    the passes `ps` (-O levels expanded; empty when unknown): kind is "cexknown" for the
+    documented behaviours (KNOWN_CEX), "cexsus" for flags / passes that use facts the per-function
+    comparison cannot see (ASSUME, LOWERING, MODULE_FACTS such as simplify-globals*), else "cex" """
+    sus = suspect_reason(c, ps)
+    known = KNOWN_CEX.get(frozenset(ps or passes_of(c)))
+    kind = "cexknown" if known else "cexsus" if sus else "cex"
+    return kind, sus, known
+
+
+def expanded_passes(cf, c, mb, feats=None):
     """the passes a configuration runs, in order (-O levels expanded)"""
-    rc, out = run([cf["wasm_opt"]] + cfg.FEATURES + c + [mb, "-o", "/dev/null"], 120,
+    rc, out = run([cf["wasm_opt"]] + (feats or cfg.FEATURES) + c + [mb, "-o", "/dev/null"], 120,
                   env=dict(os.environ, BINARYEN_PASS_DEBUG="1"))
     return re.findall(r"running pass: (\S+?)\.\.\.", out) if rc == 0 else []
 
 
 # ---------------------------------------------------------------- helpers
-def run(cmd, timeout, env=None):
+def _limit_as(gb):
+    def f():
+        import resource
+        b = int(gb * (1 << 30))
+        resource.setrlimit(resource.RLIMIT_AS, (b, b))
+    return f
+
+
+def run(cmd, timeout, env=None, mem_gb=None):
+    """mem_gb: address-space limit of the child (exwasm / Z3); not for node (V8 reserves address space)"""
     try:
-        p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout, env=env)
+        p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout, env=env,
+                           preexec_fn=_limit_as(mem_gb) if mem_gb else None)
         return p.returncode, p.stdout.decode(errors="replace")
     except subprocess.TimeoutExpired:
         return "timeout", ""
@@ -198,7 +326,7 @@ def tv(cf, a, b, func=None):
     if func:
         cmd += ["--func", func]
     t0 = time.time()
-    rc, out = run(cmd, cf["tv_timeout_s"])
+    rc, out = run(cmd, cf["tv_timeout_s"], mem_gb=cf.get("mem_gb", 3))
     res = {}
     if rc == "timeout":
         return None, "tv process timeout", time.time() - t0, out
@@ -231,6 +359,9 @@ def crash_sig(out, rc):
 
 
 KNOWN_CRASH = [("Unsupported instruction for Flatten: BrOn", "known: Flatten on br_on_*"),
+               ("ReReloop does not support EH", "known: ReReloop rejects EH (Fatal)"),
+               ("DataFlow does not support EH", "known: DataFlow rejects EH (Fatal)"),
+               ("atomic accesses must have natural alignment", "candidate: --dealign gives atomic accesses align=1 (invalid output)"),
                ("ConstraintAnalysis", "known?: ConstraintAnalysis assertion (#9109)")]
 
 
@@ -278,6 +409,11 @@ class Worker:
                       "families_b": {}, "oracle_b": {}, "crash_sigs": {}, "v8_diffs": 0, "invalid_output": 0,
                       "started": time.time()}
         self.last_snap = 0
+        self.feats = list(cfg.FEATURES)
+        self.raw_feats = list(cfg.RAW_FEATURES)
+        self.pass_wts = pass_weights()
+        self.nan_mod = False
+        self.focus = None
         self.nbad = len(glob.glob(wd + "/bad/*"))
         self.rolling = []
         self.seed_pool = []
@@ -308,11 +444,22 @@ class Worker:
 
     # ------------------------------------------------ feedback
     def row_weights(self):
+        """row weight multipliers: rows in functions exwasm cannot take are sampled less (relative to
+        the overall unsupported rate), rows whose functions tend to be changed by the passes slightly more"""
+        rows = self.stats["rows"]
+        tn = sum(v.get("n", 0) for v in rows.values())
+        tb = sum(v.get("unsup", 0) for v in rows.values())
+        ttv = sum(v.get("tv", 0) for v in rows.values())
+        tch = sum(v.get("changed", 0) for v in rows.values())
+        base_bad = tb / tn if tn else 0
+        base_ch = tch / ttv if ttv else 0
         w = {}
-        for k, v in self.stats["rows"].items():
+        for k, v in rows.items():
             n, bad = v.get("n", 0), v.get("unsup", 0)
             if n >= 20:
-                w[k] = max(0.15, 1.0 - 1.5 * bad / n)
+                w[k] = max(0.3, 1.0 - 1.5 * max(0.0, bad / n - base_bad))
+                if v.get("tv", 0) >= 20 and base_ch > 0:
+                    w[k] *= min(1.5, 0.7 + 0.3 * (v["changed"] / v["tv"]) / base_ch)
         return w
 
     def mut_weights(self):
@@ -347,7 +494,9 @@ class Worker:
             for f in m.funcs:
                 f.meta["rows"] = {}
         else:
-            m = gen.gen_module(self.seed, self.row_weights())
+            decl = random.Random(self.seed * 11 + 3).random() < cf.get("decl_rate", 0)
+            m = gen.gen_module(self.seed, self.row_weights(), flags=gen.pick_flags(random.Random(self.seed * 7 + 1), cf),
+                               decl=decl)
             src_tag = src
             done = []
             if src == "mix":
@@ -367,6 +516,26 @@ class Worker:
             srcs_in = {d.split(":", 1)[1] for d in f.meta["muts"] if d.startswith("splice") and ":" in d}
             f.meta["splice_srcs"] = sorted(srcs_in)
         return m, src_tag, done
+
+    def set_feats(self, m, wat):
+        """wasm-opt feature flags for this module: SIMD / threads / tail calls / multivalue only when it
+        uses them (they change what passes do, e.g. memory.fill lowering), no EH for `noeh` modules"""
+        with open(wat) as fh:
+            text = fh.read()
+        noeh = bool(m.meta.get("noeh"))
+        self.feats = cfg.features_for(cfg.FEATURES, text, noeh)
+        self.raw_feats = cfg.features_for(cfg.RAW_FEATURES, text, noeh)
+        self.focus = m.meta.get("focus")
+        self.nan_mod = "reinterpret" in text
+        # a 65536-page memory: V8 would have to allocate (and v8diff.js hash) 4 GiB
+        self.nov8 = bool(m.meta.get("nov8"))
+        st = self.stats.setdefault("module_flags", {})
+        for k, on in (("wide", m.meta.get("wide")), ("noeh", noeh), ("simd", "--enable-simd" in self.feats),
+                      ("relaxed", "--enable-relaxed-simd" in self.feats), ("atomic", "--enable-threads" in self.feats),
+                      ("tail", "--enable-tail-call" in self.feats), ("multivalue", "--enable-multivalue" in self.feats)):
+            if on:
+                self.cnt(st, k)
+        self.cnt(self.stats.setdefault("focus", {}), self.focus or "none")
 
     def emit(self, m, path_wat, path_wasm):
         with open(path_wat, "w") as fh:
@@ -394,6 +563,7 @@ class Worker:
         self.bump(self.stats["sources"], src, "modules")
         mw, mb = wd + "/m.wat", wd + "/m.wasm"
         ok, err = self.emit(m, mw, mb)
+        self.set_feats(m, mw)
         for d, _ in done:
             self.bump(self.stats["mutators"], d, "applied")
         if not ok:
@@ -435,15 +605,11 @@ class Worker:
             self.oracle_b(cf, mid + "f", src, fw, fb, "full", fams=None)
         if not keep:
             return
-        if len(keep) < len(m.funcs):
-            m.funcs = keep
-            ok, err = self.emit(m, mw, mb)
-            if not ok:
-                self.cnt(self.stats["invalid"], "after drop: " + norm(err.splitlines()[0] if err else "?"))
-                return
+        # functions exwasm cannot take stay in the module (the others may call them); only `keep` is compared
         self.stats["modules"] += 1
+        self.pass_wts = pass_weights(self.stats["per_pass"], cf.get("fruitful_weight", 2.5), cf.get("pass_boost"))
         finfo = {}
-        for f in m.funcs:
+        for f in keep:
             fams, feats, ops = func_feats(m, f)
             finfo[f.export] = (f, feats)
             for fa, c in fams.items():
@@ -464,19 +630,20 @@ class Worker:
         r = self.r
         wd = self.wd
         rtb = wd + "/rt.wasm"
-        rc, out = run([cf["wasm_opt"]] + cfg.FEATURES + [mb, "-o", rtb], 60)
+        rc, out = run([cf["wasm_opt"]] + self.feats + [mb, "-o", rtb], 60)
         if rc != 0:
             self.cnt(self.stats["input_rejected"], norm((out.strip().splitlines() or ["?"])[-1]))
             return
-        rc, rt = run([cf["wasm_opt"]] + cfg.FEATURES + [rtb, "--print"], 60)
+        rc, rt = run([cf["wasm_opt"]] + self.feats + [rtb, "--print"], 60)
         rtf = split_printed(rt) if rc == 0 else {}
         seen = {}
         for _ in range(r.randint(*cf["configs_per_module"])):
-            c, kind = pick_config(r)
+            c, kind = pick_config(r, self.pass_wts, self.focus, cf.get("shape_bias", .3), only=cf.get("only_passes"))
+            c = extra_args(r, cf, c)
             ck = " ".join(c)
             ob = wd + "/o.wasm"
-            rc, out = run([cf["wasm_opt"]] + cfg.FEATURES + c + [mb, "-o", ob], 120)
-            self.maybe_cov(cf, c, mb, cfg.FEATURES)
+            rc, out = run([cf["wasm_opt"]] + self.feats + c + [mb, "-o", ob], 120)
+            self.maybe_cov(cf, c, mb, self.feats)
             pc = self.stats["per_config"].setdefault(ck, {})
             if rc != 0:
                 self.opt_failed(mid, src, ck, c, kind, rc, out, mw, mb, "A")
@@ -485,7 +652,7 @@ class Worker:
                 continue
             with open(ob, "rb") as fh:
                 h = hashlib.sha1(fh.read()).hexdigest()
-            rc2, pr = run([cf["wasm_opt"]] + cfg.FEATURES + [ob, "--print"], 60)
+            rc2, pr = run([cf["wasm_opt"]] + self.feats + [ob, "--print"], 60)
             of = split_printed(pr) if rc2 == 0 else {}
             changed = {exp: (rtf.get(exp) != of.get(exp) or exp not in rtf) for exp in finfo}
             self.pass_stats(c, kind, len(changed), sum(changed.values()))
@@ -502,24 +669,28 @@ class Worker:
                 else:
                     tvres, terr, secs, tvout = {}, None, 0, ""
                 seen[h] = (tvres, terr, secs, tvout)
-                if tvres and any(v[0] == "counterexample" for v in tvres.values()):
+                if tvres is None and "panicked" in (tvout or ""):
+                    # an exwasm bug, not a finding about wasm-opt: keep the pair for the exwasm side
+                    sig = norm(next((ln for ln in tvout.splitlines() if "panicked at" in ln), "panic"))
+                    if self.stats.setdefault("tv_panics", {}).get(sig, 0) < 3:
+                        self.save_bad("tverr", mid, ck, mw, mb, ob, tvout, finfo, {"sig": sig})
+                    self.cnt(self.stats["tv_panics"], sig)
+                if tvres and any(v[0] == "counterexample" and e in finfo for e, v in tvres.items()):
                     v8 = self.v8(cf, mb, ob) if not set(passes_of(c)) & V8_SKIP else None
-                    ps = expanded_passes(cf, c, mb)
-                    sus = suspect_reason(c, ps)
-                    known = KNOWN_CEX.get(frozenset(ps or passes_of(c)))
-                    extra = {"v8": v8, "suspect": sus, "known": known, "passes": ps,
-                             "cex_funcs": sorted(e for e, v in tvres.items() if v[0] == "counterexample")}
-                    if known:
+                    ps = expanded_passes(cf, c, mb, self.feats)
+                    kind_cex, sus, known = cex_class(c, ps)
+                    cfuncs = sorted(e for e, v in tvres.items() if v[0] == "counterexample" and e in finfo)
+                    extra = {"v8": v8, "suspect": sus, "known": known, "passes": ps, "cex_funcs": cfuncs,
+                             "cex_rows": {e: sorted(finfo[e][0].meta.get("rows", {})) for e in cfuncs if e in finfo},
+                             "focus": self.focus}
+                    if kind_cex == "cexknown":
                         self.stats["cex_known"] = self.stats.get("cex_known", 0) + 1
-                        self.save_bad("cexknown", mid, ck, mw, mb, ob, tvout, finfo, extra)
-                    elif sus:
+                    elif kind_cex == "cexsus":
                         self.stats["cex_suspect"] += 1
-                        self.save_bad("cexsus", mid, ck, mw, mb, ob, tvout, finfo, extra)
                     else:
                         self.stats["cex"] += 1
-                        self.save_bad("cex", mid, ck, mw, mb, ob, tvout, finfo, extra)
-                elif any(changed.values()) and r.random() < cf["v8_rate"] and kind != "closed" \
-                        and not set(passes_of(c)) & V8_SKIP:
+                    self.save_bad(kind_cex, mid, ck, mw, mb, ob, tvout, finfo, extra)
+                elif any(changed.values()) and r.random() < cf["v8_rate"] and not set(passes_of(c)) & V8_SKIP:
                     # cross-check exwasm with V8 on the same pair
                     self.v8_check(cf, mid, src, ck, mw, mb, ob, "A")
             for exp, (f, feats) in finfo.items():
@@ -541,6 +712,13 @@ class Worker:
         if not dup:
             self.cnt(st["verdicts"], v)
             self.cnt(pc, v)
+            self.bump(st["sources"], src, "tv")
+            if v != "unchanged":
+                self.bump(st["sources"], src, "changed")
+            for rw in f.meta.get("rows", {}):
+                self.bump(st["rows"], rw, "tv")
+                if v != "unchanged":
+                    self.bump(st["rows"], rw, "changed")
             if v in ("unsupported", "unknown", "error"):
                 self.cnt(st[v], norm(det))
             for d in f.meta.get("muts", []):
@@ -608,6 +786,8 @@ class Worker:
             shutil.copy(r.choice(self.raw_files), raw)
             rc = 0
         self.bump(self.stats["sources"], tag, "modules")
+        self.raw_feats, self.focus, self.nan_mod = list(cfg.RAW_FEATURES), None, False
+        self.nov8 = False
         if rc != 0:
             self.bump(self.stats["sources"], tag, "gen_fail")
             return
@@ -631,7 +811,7 @@ class Worker:
     def oracle_b(self, cf, mid, src, mw, mb, why, fams=None):
         r = self.r
         wd = self.wd
-        feats = cfg.RAW_FEATURES
+        feats = self.raw_feats
         self.stats["modules_b"] += 1
         self.cnt(self.stats["oracle_b"], "modules:" + why)
         for fa, c in (fams or {}).items():
@@ -644,7 +824,8 @@ class Worker:
         with open(rtb, "rb") as fh:
             rth = hashlib.sha1(fh.read()).hexdigest()
         for _ in range(r.randint(*cf["configs_per_module"])):
-            c, kind = pick_config(r)
+            c, kind = pick_config(r, self.pass_wts, self.focus, cf.get("shape_bias", .3), only=cf.get("only_passes"))
+            c = extra_args(r, cf, c)
             ck = " ".join(c)
             ob = wd + "/ob.wasm"
             rc, out = run([cf["wasm_opt"]] + feats + c + [mb, "-o", ob], 120)
@@ -661,7 +842,7 @@ class Worker:
                 v, det = "unchanged", ""
             elif not self.valid_output(mid, src, ck, mw, mb, ob, "B"):
                 v, det = "invalid", ""
-            elif kind == "closed" or set(passes_of(c)) & V8_SKIP:
+            elif set(passes_of(c)) & V8_SKIP:
                 v, det = "valid", ""
             else:
                 self.bump(self.stats["per_kind"], "B:" + kind, "changed")
@@ -682,6 +863,9 @@ class Worker:
             return {"same": True, "skip": "v8diff failed: " + norm(out[-200:])}
 
     def v8_check(self, cf, mid, src, ck, mw, mb, ob, oracle):
+        if getattr(self, "nov8", False):
+            self.cnt(self.stats["oracle_b"], "v8-skip: big memory")
+            return "v8-skip", "big memory"
         res = self.v8(cf, mb, ob)
         if res.get("skip"):
             self.cnt(self.stats["oracle_b"], "v8-skip: " + norm(res["skip"])[:60])
@@ -695,11 +879,23 @@ class Worker:
         if "too large" in detail or "out of memory" in detail.lower():
             self.cnt(self.stats["oracle_b"], "v8-limit")
             return "v8-limit", detail
+        # under --traps-never-happen alone, a call that returned in the input and traps in the
+        # output breaks the flag's contract (the input did not trap there)
+        if set(ck.split()) & ASSUME == {"--traps-never-happen"} and re.search(r"\): ok:\S* vs trap\b", detail):
+            self.cnt(self.stats["oracle_b"], "v8-diff-tnh")
+            self.save_bad("v8tnh", mid, ck, mw, mb, ob, detail, {}, {"oracle": oracle, "src": src})
+            return "v8-diff-tnh", detail
         # a flag that lets the pass assume something about the program
         if set(ck.split()) & ASSUME:
             self.cnt(self.stats["oracle_b"], "v8-diff-assumed")
             self.save_bad("v8sus", mid, ck, mw, mb, ob, detail, {}, {"oracle": oracle, "src": src, "assume": sorted(set(ck.split()) & ASSUME)})
             return "v8-diff-assumed", detail
+        if self.nan_mod:
+            # the module observes float bits through reinterpret; V8 and Binaryen's constant folding
+            # may disagree on NaN payload / sign (nondeterministic in the spec)
+            self.cnt(self.stats["oracle_b"], "v8-diff-nan")
+            self.save_bad("v8nan", mid, ck, mw, mb, ob, detail, {}, {"oracle": oracle, "src": src})
+            return "v8-diff-nan", detail
         self.stats["v8_diffs"] += 1
         self.save_bad("v8diff", mid, ck, mw, mb, ob, detail, {}, {"oracle": oracle, "src": src})
         return "v8-diff", detail
@@ -709,7 +905,7 @@ class Worker:
         if rc == 0:
             return True
         # wasm-tools may lag Binaryen on a feature: Binaryen's own validator decides
-        rc2, out2 = run([cfg.load()["wasm_opt"]] + cfg.RAW_FEATURES + [ob, "-o", "/dev/null"], 60)
+        rc2, out2 = run([cfg.load()["wasm_opt"]] + self.raw_feats + [ob, "-o", "/dev/null"], 60)
         self.stats["invalid_output"] += 1
         sig = "invalid output (%s): %s" % ("both" if rc2 != 0 else "wasm-tools only", norm(out.splitlines()[0] if out else ""))
         n = self.stats["crash_sigs"].get(sig, 0)

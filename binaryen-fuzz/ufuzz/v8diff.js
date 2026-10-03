@@ -108,12 +108,23 @@ function state(ex) {
   return s.join(' ');
 }
 
+// A call that runs longer than HANG_MS is cut off (vm watchdog terminates the
+// wasm loop) and counts as outcome "hang", so that a trap turning into a
+// non-terminating loop (or back) is a difference instead of a process timeout.
+// V8DIFF_HANG_MS overrides the limit (re-checks use a longer one).
+const vm = require('vm');
+const HANG_MS = Number(process.env.V8DIFF_HANG_MS || 1500);
+const callScript = new vm.Script('f(...a)');
+const callCtx = vm.createContext({ f: null, a: null });
+
 function outcome(f, a) {
   try {
-    let r = f(...a);
+    callCtx.f = f; callCtx.a = a;
+    let r = callScript.runInContext(callCtx, { timeout: HANG_MS });
     if (!Array.isArray(r)) r = [r];
     return 'ok:' + r.map(norm).join(',');
   } catch (e) {
+    if (e && e.code === 'ERR_SCRIPT_EXECUTION_TIMEOUT') return 'hang';
     if (e instanceof WebAssembly.RuntimeError) return 'trap';
     if (typeof WebAssembly.Exception === 'function' && e instanceof WebAssembly.Exception) return 'wasm-exception';
     if (e instanceof RangeError && /stack/i.test(e.message)) return 'stack-overflow';
@@ -152,6 +163,7 @@ for (const name of Object.keys(sigs).sort()) {
     if (oa === 'stack-overflow' || ob === 'stack-overflow') { stop = 'stack overflow in ' + name; break; }
     const where = `${name}(${args.map(norm)})`;
     if (oa !== ob) diffs.push(`${where}: ${oa} vs ${ob}`);
+    else if (oa === 'hang') { stop = 'hang in ' + name; break; }  // state after a cut-off call is arbitrary
     else if (ta.join('|') !== tb.join('|')) diffs.push(`${where} imports: ${ta.slice(0, 6).join(' ')} vs ${tb.slice(0, 6).join(' ')}`);
     else {
       const sa = state(ia.exports), sb = state(ib.exports);

@@ -1,0 +1,53 @@
+{
+ "exwasm": "/home/tamaron/work/binaryen/binaryen-fuzz/bin/exwasm-1003e",
+ "il": "/home/tamaron/work/exwasm/il/wasm-3.0-ext.sexp",
+ "wasm_opt": "/home/tamaron/work/binaryen-0903/build/bin/wasm-opt",
+ "mem_gb": 3,
+ "features_add": [
+  "atomic"
+ ],
+ "tv_timeout_s": 120,
+ "smt_timeout_ms": 10000,
+ "decl_rate": 0.8,
+ "source_weights": {
+  "gen": 0.7,
+  "mix": 0.3,
+  "seed": 0.0,
+  "raw": 0.0
+ },
+ "extra_args": [
+  [
+   [
+    "--partial-inlining-ifs=2"
+   ],
+   0.3,
+   [
+    "inlining",
+    "inlining-optimizing",
+    "-O3",
+    "-O4",
+    "-Os"
+   ]
+  ],
+  [
+   [
+    "--partial-inlining-ifs=4"
+   ],
+   0.1,
+   [
+    "inlining",
+    "inlining-optimizing",
+    "-O3",
+    "-O4",
+    "-Os"
+   ]
+  ],
+  [
+   [
+    "--traps-never-happen"
+   ],
+   0.1,
+   null
+  ]
+ ]
+}
