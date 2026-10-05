@@ -528,6 +528,10 @@ def gen_module(seed, weights=None, nfuncs=None, flags=None, decl=False):
     g = Gen(r, m, weights)
     for i in range(nfuncs or r.randint(2, 5)):
         m.funcs.append(g.gen_func(i))
+    if decl:
+        import decls
+        if random.Random(seed * 17 + 9).random() < .3:
+            decls.post(random.Random(seed * 19 + 1), m)
     return m
 
 

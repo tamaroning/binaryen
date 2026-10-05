@@ -9,12 +9,19 @@ if [ -n "$REDUCE_TEST" ]; then
   cd "$RDIR"
   # no ulimit -v here: V8 reserves a large virtual range for each wasm memory
   timeout 30 $W $FEATS $CFG t.wasm -o t_opt.wasm >/dev/null 2>&1 || { echo OPTFAIL; exit 0; }
-  out=$(V8DIFF_HANG_MS=3000 timeout 60 node --experimental-wasm-type-reflection --experimental-wasm-exnref \
-        "$HERE/v8diff.js" t.wasm t_opt.wasm 1 2>/dev/null | tail -1)
-  case "$out" in
-    *'"same":false'*) echo "$out" | grep -q -- "$KIND" && echo DIFF || echo OTHER ;;
-    *) echo SAME ;;
-  esac
+  # A hang is a timeout, which a loaded machine can produce or miss: a
+  # candidate counts only if two runs agree.
+  verdict() {
+    out=$(V8DIFF_HANG_MS=3000 timeout 60 node --experimental-wasm-type-reflection --experimental-wasm-exnref \
+          "$HERE/v8diff.js" t.wasm t_opt.wasm 1 2>/dev/null | tail -1)
+    case "$out" in
+      *'"same":false'*) echo "$out" | grep -q -- "$KIND" && echo DIFF || echo OTHER ;;
+      *) echo SAME ;;
+    esac
+  }
+  v=$(verdict)
+  [ "$v" = DIFF ] && case "$KIND" in *hang*) [ "$(verdict)" = DIFF ] || v=FLAKY ;; esac
+  echo "$v"
   exit 0
 fi
 D=$(realpath "$1"); OUT=$2; SECS=${3:-900}
@@ -33,6 +40,9 @@ print(' '.join(cfg.features_for(cfg.FEATURES, t, False)))")
 first=$(head -1 "$D/out.txt")
 case "$first" in
   *state:*) KIND="state:" ;;
+  # keep the direction: "hang vs trap" must not reduce to two hangs
+  *"hang vs "*) KIND="hang vs $(echo "$first" | sed 's/.*hang vs \([a-z]*\).*/\1/')" ;;
+  *" vs hang"*) KIND="$(echo "$first" | sed 's/.*: \([a-z]*\) vs hang.*/\1/') vs hang" ;;
   *hang*) KIND="hang" ;;
   *trap*) KIND="trap" ;;
   *) KIND='"same":false' ;;
@@ -41,7 +51,7 @@ export REDUCE_TEST=1 RDIR=$OUT CFG FEATS W HERE KIND
 echo "cfg: $CFG  kind: $KIND"
 echo "start: $(bash "$HERE/reduce_v8.sh")"
 cd "$OUT" && (timeout "$SECS" /home/tamaron/work/binaryen/build/bin/wasm-reduce orig.wasm \
-  "--command=bash $HERE/reduce_v8.sh" --test t.wasm --working w.wasm $FEATS -f 2>&1 | tail -1)
+  "--command=bash $HERE/reduce_v8.sh" --test t.wasm --working w.wasm --timeout 150 $FEATS -f 2>&1 | tail -1)
 cp w.wasm t.wasm
 echo "end: $(bash "$HERE/reduce_v8.sh")"
 $W $FEATS w.wasm --print > w.wat 2>/dev/null

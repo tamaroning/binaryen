@@ -178,6 +178,84 @@ def pass_weights(stats_pp=None, fruitful=2.5, boost=None):
     return w
 
 
+# --fuzz-exec (Binaryen's interpreter) cannot call an unknown import that returns a value, so the
+# comparison with it runs on a copy whose "env" imports are fixed functions: a void import logs its
+# arguments through the interpreter's logging imports, a value-returning one returns a value
+# computed from its first argument of the result type (or a constant).
+_FE_IMPORT = re.compile(r'\(import "env" "[^"]*" \(func (\$\S+)((?: \(param [^()]*\))*)((?: \(result [^()]*\))*)\)\)')
+_FE_LOGS = {t: "$__fe_log_" + t for t in ("i32", "i64", "f32", "f64")}
+
+
+def fe_stub_text(text):
+    """`text` with its "env" function imports replaced for --fuzz-exec, or None if it has other
+    imports that are not "fuzzing-support" ones"""
+    stubs = []
+
+    def stub(mo):
+        name = mo.group(1)
+        params = [t for g in re.findall(r"\(param ([^()]*)\)", mo.group(2)) for t in g.split()]
+        results = [t for g in re.findall(r"\(result ([^()]*)\)", mo.group(3)) for t in g.split()]
+        if any(t not in _FE_LOGS for t in params + results) or len(results) > 1:
+            raise ValueError(name)
+        sig = "".join(" (param %s)" % t for t in params) + "".join(" (result %s)" % t for t in results)
+        if not results:
+            body = " ".join("(call %s (local.get %d))" % (_FE_LOGS[t], i) for i, t in enumerate(params))
+        else:
+            t = results[0]
+            same = [i for i, pt in enumerate(params) if pt == t]
+            body = "(%s.add (local.get %d) (%s.const 7))" % (t, same[0], t) if same else "(%s.const 7)" % t
+        stubs.append("  (func %s%s %s)" % (name, sig, body))
+        return ""
+
+    try:
+        out = _FE_IMPORT.sub(stub, text)
+    except ValueError:
+        return None
+    if re.search(r'\(import "(?!fuzzing-support")', out):
+        return None
+    logs = "".join('  (import "fuzzing-support" "log-%s" (func %s (param %s)))\n' % (t, n, t) for t, n in _FE_LOGS.items())
+    # imports come before any definition: right after "(module" (and its name, if any)
+    out = re.sub(r"\(module(\s+\$[^\s()]+)?", lambda mo: mo.group(0) + "\n" + logs, out, count=1)
+    k = out.rstrip().rfind(")")
+    return out[:k] + "\n".join(stubs) + "\n)\n"
+
+
+def fuzz_exec_check(cf, feats, wat_path, c, wd):
+    """does `wasm-opt --fuzz-exec` with configuration `c` see the difference? "detects",
+    "misses", "timeout" (the interpreter did not finish: e.g. a loop that no longer ends),
+    "oom" (the interpreter ran out of the memory cap, e.g. a 4 GiB memory), "unrunnable"
+    (imports it cannot stub) or "error"""
+    try:
+        text = open(wat_path).read()
+    except OSError:
+        return "unrunnable"
+    st = fe_stub_text(text)
+    if st is None:
+        return "unrunnable"
+    fw, fb = wd + "/fe.wat", wd + "/fe.wasm"
+    with open(fw, "w") as fh:
+        fh.write(st)
+    rc, out = run(["wasm-tools", "parse", fw, "-o", fb], 60)
+    if rc != 0:
+        return "error"
+    # the interpreter allocates a module's whole memory (4 GiB for 65536 pages): cap it
+    rc, out = run([cf["wasm_opt"]] + feats + [fb] + c + ["--fuzz-exec", "-o", "/dev/null"], cf.get("fe_timeout_s", 60),
+                  mem_gb=cf.get("fe_mem_gb", 3))
+    if rc == "timeout":
+        return "timeout"
+    if "optimization passes changed results" in out:
+        return "detects"
+    if rc == 0:
+        return "misses"
+    if "bad_alloc" in out or "out of memory" in out.lower() or "Cannot allocate" in out:
+        return "oom"
+    return "error"
+
+
+def cf_save_crashes():
+    return bool(cfg.load().get("save_crashes", True))
+
+
 def extra_args(r, cf, c):
     """`c` plus the options of config "extra_args" ([args, probability, passes or null]) drawn for it:
     each is added with its probability when `c` runs one of its passes (or always, for null)"""
@@ -683,6 +761,11 @@ class Worker:
                     extra = {"v8": v8, "suspect": sus, "known": known, "passes": ps, "cex_funcs": cfuncs,
                              "cex_rows": {e: sorted(finfo[e][0].meta.get("rows", {})) for e in cfuncs if e in finfo},
                              "focus": self.focus}
+                    if cf.get("fe_check", True):
+                        # the counterexamples worth most: those --fuzz-exec does not see
+                        fe = fuzz_exec_check(cf, self.feats, mw, c, wd)
+                        extra["fuzz_exec"] = fe
+                        self.cnt(self.stats.setdefault("cex_fuzz_exec", {}), "%s:%s" % (kind_cex, fe))
                     if kind_cex == "cexknown":
                         self.stats["cex_known"] = self.stats.get("cex_known", 0) + 1
                     elif kind_cex == "cexsus":
@@ -923,7 +1006,8 @@ class Worker:
         pc = self.stats["per_config"].setdefault(ck, {})
         self.cnt(pc, "optfail")
         # Fatal() is Binaryen rejecting a configuration / input on purpose
-        if n < (3 if cat in ("assert", "signal", "timeout", "other") and not kn else 1):
+        # crashes are counted; saving them is optional (the campaigns look for miscompilations)
+        if cf_save_crashes() and n < (3 if cat in ("assert", "signal", "timeout", "other") and not kn else 1):
             self.save_bad("crash" if cat != "fatal" else "fatal", mid, ck, mw, mb, None, out[-4000:], {},
                           {"oracle": oracle, "src": src, "sig": key, "kind": kind})
         return "crash-" + cat

@@ -145,3 +145,59 @@ def _call_guard(g, want, d):
     if not gs:
         return None
     return N("call", [g.r.choice(gs)], [g.expr("i32", d + 1), g.expr("i32", d + 1)])
+
+
+def _zero(t):
+    if t in ("i32", "i64", "f32", "f64"):
+        return N(t + ".const", ["0"])
+    if t == "v128":
+        return N("v128.const", ["i32x4", "0", "0", "0"]) if False else N("v128.const", ["i32x4", "0", "0", "0", "0"])
+    return None
+
+
+ANNOTATIONS = ["@binaryen.removable.if.unused", "@binaryen.idempotent"]
+
+
+def _annotate(r, stmts):
+    """Put one annotation before a call statement of `stmts` (or of an `if` arm)."""
+    spots = []
+
+    def scan(lst):
+        for i, s in enumerate(lst):
+            inner = s.kids[0] if s.op == "drop" and s.kids else s
+            if inner.op == "call":
+                spots.append((lst, i))
+            if s.op in ("block", "loop", "if", "then", "else"):
+                scan(s.kids)
+
+    scan(stmts)
+    if not spots:
+        return False
+    lst, i = r.choice(spots)
+    lst.insert(i, N(r.choice(ANNOTATIONS)))
+    return True
+
+
+def post(r, m):
+    """Duplicate a function (same body), an unexported copy that one more exported
+    function calls next to the original, and annotate a call in one of the two."""
+    import copy
+    cands = [f for f in m.funcs if all(_zero(t) is not None for _, t in f.params) and not f.name.startswith("$pg")]
+    if not cands:
+        return
+    for k in range(r.randint(1, 2)):
+        f = r.choice(cands)
+        dup = Func(f.name + "_dup%d" % k, list(f.params), list(f.results), list(f.locals), copy.deepcopy(f.body))
+        # a call with an effect, in both, for the annotation to matter
+        logs = [i for i in m.imports if not i[4] and all(_zero(t) is not None for t in i[3])]
+        if logs and r.random() < .7:
+            fn, _, _, ps, _ = r.choice(logs)
+            at = r.randint(0, len(f.body))
+            for fx in (f, dup):
+                fx.body.insert(at, N("call", [fn], [_zero(t) for t in ps]))
+        if r.random() < .8:
+            _annotate(r, r.choice([dup.body, f.body]))
+        args = lambda: [_zero(t) for _, t in f.params]  # noqa: E731
+        calls = [N("drop", [], [N("call", [x.name], args())]) if x.results else N("call", [x.name], args()) for x in (f, dup)]
+        wrapper = Func("$dw%d" % k, [], [], [], calls, export="dw%d" % k)
+        m.funcs.extend([dup, wrapper])

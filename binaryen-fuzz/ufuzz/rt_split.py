@@ -39,7 +39,7 @@ def one(exwasm, il, d, f, smt_ms, timeout_s, mem_gb):
             if p.returncode != 0:
                 return {"dir": d, "func": f, "verdict": "rt-failed", "detail": (p.stdout + p.stderr)[-200:]}
             os.makedirs(t + "/x")
-            os.symlink(d + "/m.wasm", t + "/x/m.wasm")
+            os.symlink(os.path.abspath(d) + "/m.wasm", t + "/x/m.wasm")
             os.symlink(t + "/o.wasm", t + "/x/o.wasm")
             r = check(exwasm, il, t + "/x", f, smt_ms, timeout_s, mem_gb)
     except Exception as e:  # noqa: BLE001 -- keep writing the other results

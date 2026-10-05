@@ -1,5 +1,5 @@
 {
- "exwasm": "/home/tamaron/work/binaryen/binaryen-fuzz/bin/exwasm-1003e",
+ "exwasm": "/home/tamaron/work/binaryen/binaryen-fuzz/bin/exwasm-1004m",
  "il": "/home/tamaron/work/exwasm/il/wasm-3.0-ext.sexp",
  "wasm_opt": "/home/tamaron/work/binaryen-0903/build/bin/wasm-opt",
  "mem_gb": 3,
@@ -49,5 +49,8 @@
    0.1,
    null
   ]
- ]
+ ],
+ "save_crashes": true,
+ "fe_check": true,
+ "fe_timeout_s": 60
 }
