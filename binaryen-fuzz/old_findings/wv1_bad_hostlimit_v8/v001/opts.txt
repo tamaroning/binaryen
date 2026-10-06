@@ -1,1 +1,0 @@
--Os --type-merging --simplify-globals-optimizing --closed-world

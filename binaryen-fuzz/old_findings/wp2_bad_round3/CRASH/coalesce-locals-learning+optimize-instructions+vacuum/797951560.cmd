@@ -1,2 +1,0 @@
-/home/tamaron/work/binaryen/bin/wasm-opt wp2/mut.wat --all-features --disable-fp16 --disable-shared-everything --disable-stack-switching --fuzz-exec --coalesce-locals-learning --optimize-instructions --vacuum -o /dev/null --closed-world
-/home/tamaron/work/binaryen/bin/wasm-opt -ttf wp2/in.bin --all-features --disable-fp16 --disable-shared-everything --disable-stack-switching -o wp2/gen.wasm --closed-world --enclose-world --denan
