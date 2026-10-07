@@ -399,10 +399,17 @@ def split_printed(text):
     return out
 
 
-def tv(cf, a, b, func=None):
+# wasm-opt's assumption flags that exwasm takes as premises of the refinement (exwasm tv --assume).
+PREMISES = {"--traps-never-happen": "traps-never-happen", "-tnh": "traps-never-happen", "--fast-math": "fast-math"}
+
+
+def tv(cf, a, b, func=None, config=()):
     cmd = [cf["exwasm"], "--il", cf["il"], "tv", a, b, "--smt-timeout-ms", str(cf["smt_timeout_ms"])]
     if func:
         cmd += ["--func", func]
+    assume = sorted({PREMISES[f] for f in config if f in PREMISES})
+    if assume:
+        cmd += ["--assume", ",".join(assume)]
     t0 = time.time()
     rc, out = run(cmd, cf["tv_timeout_s"], mem_gb=cf.get("mem_gb", 3))
     res = {}
@@ -742,7 +749,7 @@ class Worker:
             else:
                 dup = False
                 if any(changed.values()):
-                    tvres, terr, secs, tvout = tv(cf, mb, ob)
+                    tvres, terr, secs, tvout = tv(cf, mb, ob, config=c)
                     self.stats["tv_runs"] += 1
                 else:
                     tvres, terr, secs, tvout = {}, None, 0, ""
