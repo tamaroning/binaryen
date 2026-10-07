@@ -38,7 +38,10 @@ READ_FEATURES = ["--enable-gc", "--enable-reference-types", "--enable-multimemor
                  "--enable-tail-call", "--enable-extended-const", "--enable-multivalue",
                  "--enable-relaxed-simd", "--enable-bulk-memory-opt", "--enable-call-indirect-overlong"]
 BAD_FAMILIES = {"float", "simd", "data", "table", "exn", "other"}
-BIN = "/home/tamaron/work/binaryen"
+# Source checkouts; override with UFUZZ_BINARYEN, UFUZZ_SPECTEC and UFUZZ_REAL (a colon-separated list of
+# directories of compiled .wasm, each tagged real-<basename>) on another machine.
+BIN = os.environ.get("UFUZZ_BINARYEN", "/home/tamaron/work/binaryen")
+SPECTEC = os.environ.get("UFUZZ_SPECTEC", "/home/tamaron/work/spectec")
 MAX_FUNC_NODES = 250
 FUNC_TIMEOUT = 30
 CHUNKS = 4
@@ -352,14 +355,18 @@ def jobs_for(sources, limit, r):
         fs = sorted(glob.glob(BIN + "/test/spec/**/*.wast", recursive=True))
         for f in fs:
             jobs.append(("spec-binaryen", f, "wast", r.getrandbits(32)))
-        fs = sorted(glob.glob("/home/tamaron/work/spectec/test/**/*.wast", recursive=True))
+        fs = sorted(glob.glob(SPECTEC + "/test/**/*.wast", recursive=True))
         for f in fs:
             jobs.append(("spec-spectec", f, "wast", r.getrandbits(32)))
     if "real" in sources:
         B = "/home/tamaron/work/superwasm/benchmarks"
-        for d in ["rosetta", "wasm-benchmarks", "wasm-score", "wasm-score-o3", "as-benchmarks", "as-bench", "superstack-circom",
-                  "kotlin-wasm", "kotlin-wasm-benchmarks"]:
-            fs = sorted(glob.glob(B + "/" + d + "/**/*.wasm", recursive=True))
+        dirs = [B + "/" + d for d in ["rosetta", "wasm-benchmarks", "wasm-score", "wasm-score-o3", "as-benchmarks", "as-bench",
+                                      "superstack-circom", "kotlin-wasm", "kotlin-wasm-benchmarks"]]
+        if os.environ.get("UFUZZ_REAL"):
+            dirs = os.environ["UFUZZ_REAL"].split(":")
+        for dd in dirs:
+            d = os.path.basename(dd.rstrip("/"))
+            fs = sorted(glob.glob(dd + "/**/*.wasm", recursive=True))
             fs = [f for f in fs if os.path.getsize(f) <= 6 * 1024 * 1024]
             r.shuffle(fs)
             tag = "real-kotlin" if d.startswith("kotlin") else "real-" + d
