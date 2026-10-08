@@ -5,7 +5,8 @@ choice of passes are fuzz_opt.py's own functions, called in the order main() and
 call them, so a seed here draws the same module and the same passes as in fuzz_opt.py.  Only
 the oracle differs (--oracle): `tv` runs exwasm tv on (a.wasm, b.wasm); `fo` runs one of
 fuzz_opt's testcase handlers on them, chosen as test_one() chooses it, except TrapsNeverHappen
-(it optimizes again under --traps-never-happen, which changes what counts as correct).  Both
+(it optimizes again under --traps-never-happen, which changes what counts as correct) and
+ClusterFuzz (it ignores the pair and tests ClusterFuzz's own bundle on modules of its own).  Both
 oracles share everything up to b.wasm, so a seed gives both the same a.wasm, b.wasm and passes.
 Two departures, both so that exwasm can read the module and neither aimed at a bug: proposals
 beyond WebAssembly 3.0 are disabled (NON_3_0), and legacy `try` in the generated module is
@@ -20,6 +21,8 @@ env:   TTFTV_ROOT    binaryen worktree whose scripts/ and test/ are used (initia
        TTFTV_BIN     directory of the wasm-opt under test
        TTFTV_EXWASM  exwasm binary;  TTFTV_IL  its IL
        TTFTV_SMT_MS (20000), TTFTV_TV_S (600), TTFTV_MEM_GB (3)
+       TTFTV_TV_PAR  (0) if K > 0, run one exwasm per exported function (--func), K at a time,
+                     so a module cut off at TTFTV_TV_S keeps the verdicts of its finished functions
        V8            d8 for --oracle fo (fuzz_opt's handlers run it); TTFTV_FO_S (600) per module
 """
 import argparse
@@ -84,6 +87,59 @@ if os.environ.get("TTFTV_ONLY_3_0", "1") == "1":
 
 F.init_important_initial_contents()
 
+# fuzz_shell.js prints an exported i64 global as its two 32-bit halves, Binaryen's interpreter as
+# one number, and fix_output does not reconcile them, so CompareVMs reports every module that
+# exports an i64 global and runs on d8.  fuzz_opt.py rarely runs d8 (most of its modules enable a
+# feature d8 lacks), but with NON_3_0 disabled it often does.  Likewise, an exported f64 global
+# is printed exactly by the interpreter (9223372036854775808) and as JS prints it by d8
+# (9223372036854776000).  Both outputs get the same rewrite: a logged pair of 32-bit numbers
+# becomes the 64-bit value, and a logged number that is not an integer below 2^53 is printed as
+# Python prints that double.  The only comparison lost is between i64 values above 2^53 that
+# differ in their low bits.
+_fix_output = F.fix_output
+
+
+def _join_halves(m):
+    lo, hi = int(m.group(1)) & 0xffffffff, int(m.group(2)) & 0xffffffff
+    v = (hi << 32) | lo
+    return "[LoggingExternalInterface logging %d]" % (v - (1 << 64) if v >> 63 else v)
+
+
+def _as_double(m):
+    x = m.group(1)
+    if re.fullmatch(r"-?\d+", x) and abs(int(x)) < (1 << 53):
+        return m.group(0)
+    if "nan" in x.lower():
+        return "[LoggingExternalInterface logging nan]"
+    try:
+        return "[LoggingExternalInterface logging %r]" % float(x.replace("Infinity", "inf"))
+    except ValueError:
+        return m.group(0)
+
+
+def fix_output(out):
+    out = _fix_output(out)
+    if out == F.IGNORE:
+        return out
+    out = re.sub(r"\[LoggingExternalInterface logging (-?\d+) (-?\d+)\]", _join_halves, out)
+    return re.sub(r"\[LoggingExternalInterface logging ([-+.\w:]+)\]", _as_double, out)
+
+
+F.fix_output = fix_output
+
+# fuzz_opt.py runs bundle_clusterfuzz.py through its shebang, /usr/bin/python3, which is too old
+# here; run Binaryen's Python scripts with this interpreter instead.
+_run = F.run
+
+
+def run_py(cmd, *a, **k):
+    if cmd and str(cmd[0]).endswith(".py"):
+        cmd = [sys.executable] + list(cmd)
+    return _run(cmd, *a, **k)
+
+
+F.run = run_py
+
 
 def limit_as():
     b = int(MEM_GB * (1 << 30))
@@ -140,6 +196,77 @@ def tv(a, b, opts):
     return res, err, dt, out
 
 
+TV_PAR = int(os.environ.get("TTFTV_TV_PAR", "0"))
+
+
+def func_exports(path):
+    """The function exports of a wasm binary that exwasm tv checks (it skips names starting
+    with "__")."""
+    def leb(b, i):
+        r = s = 0
+        while True:
+            x = b[i]
+            i += 1
+            r |= (x & 0x7f) << s
+            s += 7
+            if x < 0x80:
+                return r, i
+    with open(path, "rb") as f:
+        b = f.read()
+    i, out = 8, []
+    while i < len(b):
+        n, j = leb(b, i + 1)
+        if b[i] == 7:
+            c, j = leb(b, j)
+            for _ in range(c):
+                ln, j = leb(b, j)
+                name = b[j:j + ln].decode()
+                kind = b[j + ln]
+                _, j = leb(b, j + ln + 1)
+                if kind == 0 and not name.startswith("__"):
+                    out.append(name)
+            break
+        i = j + n
+    return out
+
+
+def tv_par(a, b, opts):
+    """tv() with one process per exported function, TV_PAR at a time, within TV_S in all."""
+    from concurrent.futures import ThreadPoolExecutor
+    t0 = time.time()
+    deadline = t0 + TV_S
+    assume = sorted({PREMISES[f] for f in opts if f in PREMISES})
+
+    def check(name):
+        left = deadline - time.time()
+        if left < 1:
+            return name, "skipped", ""
+        # the memory limit through prlimit: preexec_fn is not safe in threads
+        cmd = ["prlimit", "--as=%d" % int(MEM_GB * (1 << 30)), EXWASM, "--il", IL, "tv", a, b,
+               "--smt-timeout-ms", str(SMT_MS), "--func", name]
+        if assume:
+            cmd += ["--assume", ",".join(assume)]
+        rc, out, _ = run(cmd, left)
+        return name, rc, out
+
+    names = func_exports(a)
+    with ThreadPoolExecutor(TV_PAR) as ex:
+        outs = list(ex.map(check, names))
+    res, errs = {}, []
+    for name, rc, out in outs:
+        for line in out.splitlines():
+            p = line.split("\t")
+            if len(p) >= 3 and p[1] in VERDICTS:
+                res[p[0]] = [p[1], p[3] if len(p) > 3 else "", p[2]]
+        if name not in res:
+            errs.append("tv timeout" if rc in ("timeout", "skipped") else
+                        ([ln for ln in out.splitlines() if ln.startswith("error")] or [out.strip()[-200:]])[0][:200])
+    err = None
+    if errs:
+        err = ("tv timeout" if "tv timeout" in errs else errs[0]) + (" (%d of %d functions)" % (len(errs), len(names)) if res else "")
+    return res, err, time.time() - t0, "\n".join(o for _, _, o in outs)
+
+
 def save_cex(seed, row, tv_out):
     d = os.path.join(OUT, "cex", str(seed))
     os.makedirs(d, exist_ok=True)
@@ -162,6 +289,8 @@ def fo(seed, row, opts):
     handle_pair, in a forked child (in a process group of its own, killed after FO_S seconds,
     since fuzz_opt runs its commands without a timeout).  A failure is saved to OUT/fail/<seed>."""
     a, b = os.path.join(WDIR, "a.wasm"), os.path.join(WDIR, "b.wasm")
+    for f in ("a", "b"):
+        shutil.copy(os.path.join(WDIR, f + ".wasm"), os.path.join(WDIR, f + "0.wasm"))
     rfd, wfd = os.pipe()
     pid = os.fork()
     if pid == 0:
@@ -169,7 +298,7 @@ def fo(seed, row, opts):
         os.setpgrp()
         res = {}
         try:
-            hs = [h for h in F.testcase_handlers if not isinstance(h, F.TrapsNeverHappen)]
+            hs = [h for h in F.testcase_handlers if not isinstance(h, (F.TrapsNeverHappen, F.ClusterFuzz))]
             relevant = [h for h in hs if not hasattr(h, "get_commands") and h.can_run_on_wasm(a)]
             if not relevant:
                 res = {"status": "fo-none"}
@@ -184,8 +313,10 @@ def fo(seed, row, opts):
                               opts=opts + F.FEATURE_OPTS)
                 res["status"] = "fo-ok"
         except BaseException as e:
+            import traceback
             res["status"] = "fo-fail"
-            res["detail"] = repr(e)[:2000]
+            res["detail"] = repr(e)[:300]
+            res["error"] = traceback.format_exc()
         sys.stdout.flush()
         with os.fdopen(wfd, "w") as f:
             json.dump(res, f)
@@ -207,11 +338,15 @@ def fo(seed, row, opts):
         pass
     os.waitpid(pid, 0)
     res["fo_s"] = round(time.time() - t0, 1)
+    error = res.pop("error", "")
     if res["status"] == "fo-fail":
         d = os.path.join(OUT, "fail", str(seed))
         os.makedirs(d, exist_ok=True)
-        for f in ("input.dat", "a.wasm", "b.wasm"):
-            shutil.copy(os.path.join(WDIR, f), d)
+        # the pair as made before the handler ran (handlers may write over a.wasm and b.wasm)
+        for f in ("input.dat", "a0.wasm", "b0.wasm"):
+            shutil.copy(os.path.join(WDIR, f), os.path.join(d, f.replace("0", "")))
+        with open(os.path.join(d, "error.txt"), "w") as f:
+            f.write(error)
         if F.INITIAL_CONTENTS and os.path.exists(F.INITIAL_CONTENTS):
             shutil.copy(F.INITIAL_CONTENTS, os.path.join(d, "initial" + os.path.splitext(F.INITIAL_CONTENTS)[1]))
         with open(os.path.join(d, "meta.json"), "w") as f:
@@ -266,6 +401,10 @@ def one(seed):
         row["status"] = "opt-fail"
         row["detail"] = out.strip()[-200:]
         return row
+    # the pair, to check that both oracles see the same one for a seed
+    for k, f in (("a_sha1", a), ("b_sha1", b)):
+        with open(f, "rb") as fh:
+            row[k] = hashlib.sha1(fh.read()).hexdigest()[:16]
     if args.regen is not None:
         return row
     if args.oracle == "fo":
@@ -285,7 +424,7 @@ def one(seed):
         if hashlib.sha1(fa.read()).digest() == hashlib.sha1(fb.read()).digest():
             row["status"] = "unchanged"
             return row
-    res, err, dt, tv_out = tv(a, b, opts)
+    res, err, dt, tv_out = (tv_par if TV_PAR > 0 else tv)(a, b, opts)
     row["tv_s"] = round(dt, 1)
     row["counts"] = {v: sum(1 for r in res.values() if r[0] == v) for v in VERDICTS}
     row["status"] = "tv-error" if err and not res else "tv"
