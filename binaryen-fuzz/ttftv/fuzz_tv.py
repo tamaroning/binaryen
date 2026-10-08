@@ -1,23 +1,26 @@
-"""Binaryen's own fuzzer (scripts/fuzz_opt.py) with exwasm's TV as the oracle.
+"""Binaryen's own fuzzer (scripts/fuzz_opt.py) with a choice of oracle: exwasm's TV or fuzz_opt's own.
 
 Generation (wasm-opt -ttf with fuzz_opt's settings, features and initial contents) and the
 choice of passes are fuzz_opt.py's own functions, called in the order main() and test_one()
 call them, so a seed here draws the same module and the same passes as in fuzz_opt.py.  Only
-the oracle differs: exwasm tv on (a.wasm, b.wasm) instead of fuzz_opt's testcase handlers.
+the oracle differs (--oracle): `tv` runs exwasm tv on (a.wasm, b.wasm); `fo` runs one of
+fuzz_opt's testcase handlers on them, chosen as test_one() chooses it, except TrapsNeverHappen
+(it optimizes again under --traps-never-happen, which changes what counts as correct).  Both
+oracles share everything up to b.wasm, so a seed gives both the same a.wasm, b.wasm and passes.
 Two departures, both so that exwasm can read the module and neither aimed at a bug: proposals
 beyond WebAssembly 3.0 are disabled (NON_3_0), and legacy `try` in the generated module is
 translated by Binaryen's --translate-to-exnref before optimization.  With TTFTV_EXPORT_ALL=1,
 every defined function is also exported before optimization (see EXPORT_ALL).
-On a module with a counterexample we also run fuzz_opt's FuzzExec handler command
-(wasm-opt a.wasm <opts> --fuzz-exec) to see whether Binaryen's own oracle reports it.
+Unlike fuzz_opt.py, a worker does not stop at the first failure.
 
-usage: fuzz_tv.py --worker K --base SEED --hours H --out DIR
+usage: fuzz_tv.py --worker K --base SEED --hours H --out DIR [--oracle tv|fo]
        Worker K draws the seeds BASE + K * 10^8, BASE + K * 10^8 + 1, ...  Rerunning the same
        command resumes (see main); `touch DIR/STOP` stops every worker after its current module.
 env:   TTFTV_ROOT    binaryen worktree whose scripts/ and test/ are used (initial contents)
        TTFTV_BIN     directory of the wasm-opt under test
        TTFTV_EXWASM  exwasm binary;  TTFTV_IL  its IL
        TTFTV_SMT_MS (20000), TTFTV_TV_S (600), TTFTV_MEM_GB (3)
+       V8            d8 for --oracle fo (fuzz_opt's handlers run it); TTFTV_FO_S (600) per module
 """
 import argparse
 import hashlib
@@ -36,6 +39,7 @@ ap.add_argument("--worker", type=int, required=True)
 ap.add_argument("--base", type=int, required=True)
 ap.add_argument("--hours", type=float, required=True)
 ap.add_argument("--out", required=True)
+ap.add_argument("--oracle", choices=("tv", "fo"), default="tv")
 ap.add_argument("--regen", type=int, help="only regenerate a.wasm / b.wasm of this seed into OUT/work/wK (no TV)")
 args = ap.parse_args()
 
@@ -150,6 +154,71 @@ def save_cex(seed, row, tv_out):
         json.dump(row, f, indent=1)
 
 
+FO_S = int(os.environ.get("TTFTV_FO_S", "600"))
+
+
+def fo(seed, row, opts):
+    """fuzz_opt's oracle on WDIR/a.wasm and b.wasm: test_one()'s choice of handler and its
+    handle_pair, in a forked child (in a process group of its own, killed after FO_S seconds,
+    since fuzz_opt runs its commands without a timeout).  A failure is saved to OUT/fail/<seed>."""
+    a, b = os.path.join(WDIR, "a.wasm"), os.path.join(WDIR, "b.wasm")
+    rfd, wfd = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        os.close(rfd)
+        os.setpgrp()
+        res = {}
+        try:
+            hs = [h for h in F.testcase_handlers if not isinstance(h, F.TrapsNeverHappen)]
+            relevant = [h for h in hs if not hasattr(h, "get_commands") and h.can_run_on_wasm(a)]
+            if not relevant:
+                res = {"status": "fo-none"}
+            else:
+                filtered = [h for h in relevant if random.random() < h.frequency]
+                if not filtered:
+                    filtered = [random.choice(relevant)]
+                h = random.choice(filtered)
+                res = {"handler": h.__class__.__name__}
+                sys.stdout.flush()
+                h.handle_pair(input=os.path.join(WDIR, "input.dat"), before_wasm=a, after_wasm=b,
+                              opts=opts + F.FEATURE_OPTS)
+                res["status"] = "fo-ok"
+        except BaseException as e:
+            res["status"] = "fo-fail"
+            res["detail"] = repr(e)[:2000]
+        sys.stdout.flush()
+        with os.fdopen(wfd, "w") as f:
+            json.dump(res, f)
+        os._exit(0)
+    os.close(wfd)
+    t0, res = time.time(), None
+    with os.fdopen(rfd) as f:
+        import select
+        while time.time() - t0 < FO_S:
+            if select.select([f], [], [], 5)[0]:
+                txt = f.read()
+                res = json.loads(txt) if txt else {"status": "fo-error", "detail": "no result"}
+                break
+    if res is None:
+        res = {"status": "fo-timeout"}
+    try:
+        os.killpg(pid, 9)
+    except ProcessLookupError:
+        pass
+    os.waitpid(pid, 0)
+    res["fo_s"] = round(time.time() - t0, 1)
+    if res["status"] == "fo-fail":
+        d = os.path.join(OUT, "fail", str(seed))
+        os.makedirs(d, exist_ok=True)
+        for f in ("input.dat", "a.wasm", "b.wasm"):
+            shutil.copy(os.path.join(WDIR, f), d)
+        if F.INITIAL_CONTENTS and os.path.exists(F.INITIAL_CONTENTS):
+            shutil.copy(F.INITIAL_CONTENTS, os.path.join(d, "initial" + os.path.splitext(F.INITIAL_CONTENTS)[1]))
+        with open(os.path.join(d, "meta.json"), "w") as f:
+            json.dump(dict(row, **res), f, indent=1)
+    return res
+
+
 def one(seed):
     # fuzz_opt.py main(): seed, input size, random bytes; then test_one() up to b.wasm
     random.seed(seed)
@@ -199,6 +268,9 @@ def one(seed):
         return row
     if args.regen is not None:
         return row
+    if args.oracle == "fo":
+        row.update(fo(seed, row, opts))
+        return row
     if REACH:
         # no TV: does the bug fire here?  The same options under a build with its fix
         c = os.path.join(WDIR, "c.wasm")
@@ -222,10 +294,6 @@ def one(seed):
     cex = {fn: r for fn, r in res.items() if r[0] == "counterexample"}
     if cex:
         row["cex"] = cex
-        # fuzz_opt's FuzzExec handler: wasm-opt before.wasm <opts> --fuzz-exec
-        frc, fout, _ = run([os.path.join(BIN, "wasm-opt"), a] + opts + F.FUZZ_OPTS + F.FEATURE_OPTS + ["--fuzz-exec"], 300)
-        row["fuzz_exec"] = {"rc": frc, "changed": "optimization passes changed results" in fout,
-                            "tail": fout.strip()[-300:]}
         save_cex(seed, row, tv_out)
     return row
 
@@ -258,6 +326,8 @@ def main():
         rows.flush()
         if row.get("cex"):
             print("cex", seed, list(row["cex"]), file=_stdout, flush=True)
+        if row.get("status") == "fo-fail":
+            print("fail", seed, row.get("handler"), row.get("detail", "")[:200], file=_stdout, flush=True)
         seed += 1
 
 if args.regen is not None:
