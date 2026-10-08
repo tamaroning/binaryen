@@ -72,7 +72,9 @@ sys.argv = ["fuzz_opt.py", "--binaryen-bin", BIN, "--out-dir", WDIR]
 os.environ.setdefault("V8", "/bin/true")
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 _stdout = sys.stdout
-sys.stdout = open(os.path.join(WDIR, "fuzz_opt.log"), "a")  # fuzz_opt prints every command
+# fuzz_opt prints every command and the output of every run (GBs per worker-hour); kept only
+# with TTFTV_FO_LOG=1
+sys.stdout = open(os.path.join(WDIR, "fuzz_opt.log") if os.environ.get("TTFTV_FO_LOG") == "1" else os.devnull, "a")
 import fuzz_opt as F  # noqa: E402
 
 # Proposals beyond WebAssembly 3.0 have no semantics in the IL, and exwasm rejects a whole module
