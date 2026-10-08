@@ -166,13 +166,16 @@ VERDICTS = ("equivalent", "bounded", "counterexample", "unsupported", "unknown")
 
 def export_all(a):
     """Adds an export "x<N>" for each defined function of `a` without one (in place)."""
-    rc, text, _ = run([os.path.join(BIN, "wasm-opt"), a, "--print"] + F.FEATURE_OPTS, 300)
+    # the text goes to a file: under BINARYEN_PASS_DEBUG, wasm-opt also logs to stderr
+    wat = a + ".wat"
+    rc, out, _ = run([os.path.join(BIN, "wasm-opt"), a, "-S", "-o", wat] + F.FEATURE_OPTS, 300)
     if rc != 0:
-        return rc, text
+        return rc, out
+    with open(wat) as f:
+        text = f.read()
     funcs = re.findall(r"^ \(func (\$\S+)", text, flags=re.M)
     exported = set(re.findall(r'^ \(export "[^"]*" \(func (\$\S+?)\)\)', text, flags=re.M))
     adds = "".join(' (export "x%d" (func %s))\n' % (k, f) for k, f in enumerate(funcs) if f not in exported)
-    wat = a + ".wat"
     with open(wat, "w") as f:
         f.write(text.rstrip()[:-1] + adds + ")\n")
     rc, out, _ = run([os.path.join(BIN, "wasm-opt"), wat, "-o", a] + F.FEATURE_OPTS, 300)
